@@ -12,6 +12,146 @@ const CATEGORY_LABELS = {
     MEETUP: '만남'
 };
 
+var MAX_BOARD_SEARCH_KEYWORD_LENGTH = 100;
+var BOARD_SEARCH_KEYWORD_LENGTH_ERROR = '검색어는 최대 100자까지 입력할 수 있습니다.';
+
+var BOARD_TOAST_COOLDOWN = 1200;
+var BOARD_INPUT_WARNING_DELAY = 600;
+var BOARD_INPUT_WARNING_COOLDOWN = 1800;
+
+window.boardToastCooldownState = window.boardToastCooldownState || {};
+window.boardInputWarningTimers = window.boardInputWarningTimers || {};
+window.boardInputWarningLastShownAt = window.boardInputWarningLastShownAt || {};
+
+// 같은 toast가 짧은 시간 안에 반복 표시되는 것을 방지
+function showBoardToastLimited(message, type, key) {
+    var toastKey = key || message;
+    var now = Date.now();
+
+    if (window.boardToastCooldownState[toastKey] && now - window.boardToastCooldownState[toastKey] < BOARD_TOAST_COOLDOWN) {
+        return;
+    }
+
+    window.boardToastCooldownState[toastKey] = now;
+
+    if (typeof showToast === 'function') {
+        showToast(message, type);
+    }
+}
+
+// input 경고 타이머 제거
+function clearBoardInputWarningTimers(id) {
+    Object.keys(window.boardInputWarningTimers).forEach(function (key) {
+        if (key.startsWith(id + ':')) {
+            clearTimeout(window.boardInputWarningTimers[key]);
+            delete window.boardInputWarningTimers[key];
+        }
+    });
+}
+
+// 정상 입력으로 돌아오면 해당 input의 경고 상태 초기화
+function clearBoardInputWarning(id) {
+    clearBoardInputWarningTimers(id);
+
+    Object.keys(window.boardInputWarningLastShownAt).forEach(function (key) {
+        if (key.startsWith(id + ':')) {
+            delete window.boardInputWarningLastShownAt[key];
+        }
+    });
+}
+
+// 입력 중 경고 toast는 debounce 후 표시
+function showBoardInputWarningOnce(id, type, message, forceShow) {
+    var key = id + ':' + type;
+    var input = document.getElementById(id);
+
+    if (!input) {
+        return;
+    }
+
+    var currentValue = input.value;
+    var delay = forceShow ? 0 : BOARD_INPUT_WARNING_DELAY;
+
+    clearBoardInputWarningTimers(id);
+
+    window.boardInputWarningTimers[key] = setTimeout(function () {
+        var latestInput = document.getElementById(id);
+
+        if (!latestInput) {
+            return;
+        }
+
+        if (latestInput.value !== currentValue) {
+            return;
+        }
+
+        var now = Date.now();
+
+        if (window.boardInputWarningLastShownAt[key] && now - window.boardInputWarningLastShownAt[key] < BOARD_INPUT_WARNING_COOLDOWN) {
+            return;
+        }
+
+        window.boardInputWarningLastShownAt[key] = now;
+        showBoardToastLimited(message, 'warning', key);
+    }, delay);
+}
+
+// 입력 중 안내 검증
+function checkBoardInputWarning(input, id, options, forceShow) {
+    var value = input.value;
+
+    if (!value) {
+        clearBoardInputWarning(id);
+        return;
+    }
+
+    if (options.maxLength && value.length > options.maxLength) {
+        showBoardInputWarningOnce(id, 'length', options.message, forceShow === true);
+        return;
+    }
+
+    clearBoardInputWarning(id);
+}
+
+// 입력창에 입력 중 안내 검증 적용
+function addBoardInputWarning(id, options) {
+    var input = document.getElementById(id);
+
+    if (!input) {
+        return;
+    }
+
+    if (options && options.maxLength) {
+        input.removeAttribute('maxlength');
+    }
+
+    if (input.dataset.boardInputWarningInitBound === 'true') {
+        return;
+    }
+
+    input.dataset.boardInputWarningInitBound = 'true';
+
+    var isComposing = false;
+
+    input.addEventListener('compositionstart', function () {
+        isComposing = true;
+    });
+
+    input.addEventListener('compositionend', function () {
+        isComposing = false;
+        checkBoardInputWarning(input, id, options, false);
+    });
+
+    input.addEventListener('input', function () {
+        if (isComposing) {
+            return;
+        }
+
+        checkBoardInputWarning(input, id, options, false);
+    });
+}
+
+
 document.addEventListener('DOMContentLoaded', function () {
     const boardTypeSelect = document.getElementById('boardType');
     const categorySelect = document.getElementById('category');
@@ -20,6 +160,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const writePostBtn = document.getElementById('writePostBtn');
     const sortTypeSelect = document.getElementById('sortType');
 
+    initBoardListInputWarnings();
+
     if (sortTypeSelect) sortTypeSelect.addEventListener('change', resetAndFetch);
 
     if (boardTypeSelect) boardTypeSelect.addEventListener('change', resetAndFetch);
@@ -27,7 +169,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (keywordInput) {
         keywordInput.addEventListener('keydown', function (event) {
-            if (event.key === 'Enter') resetAndFetch();
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                resetAndFetch();
+            }
         });
     }
     if (searchBtn) searchBtn.addEventListener('click', resetAndFetch);
@@ -45,6 +190,28 @@ document.addEventListener('DOMContentLoaded', function () {
     restoreFilterState();
     resetAndFetch();
 });
+
+
+// 게시글 목록 검색 입력창 입력 중 안내 검증 초기화
+function initBoardListInputWarnings() {
+    addBoardInputWarning('keyword', {
+        maxLength: MAX_BOARD_SEARCH_KEYWORD_LENGTH,
+        message: BOARD_SEARCH_KEYWORD_LENGTH_ERROR
+    });
+}
+
+// 검색어 최종 글자 수 검사
+function validateBoardSearchKeywordLength() {
+    const keywordInput = document.getElementById('keyword');
+
+    if (keywordInput && keywordInput.value.length > MAX_BOARD_SEARCH_KEYWORD_LENGTH) {
+        showBoardToastLimited(BOARD_SEARCH_KEYWORD_LENGTH_ERROR, 'error', 'board-search-keyword-length');
+        keywordInput.focus();
+        return false;
+    }
+
+    return true;
+}
 
 // 🚨 현재 필터 상태를 저장하는 함수
 function saveFilterState() {
@@ -69,6 +236,10 @@ function restoreFilterState() {
 
 // 목록 초기화 후 게시글 조회
 function resetAndFetch() {
+    if (!validateBoardSearchKeywordLength()) {
+        return;
+    }
+
     const postContainer = document.getElementById('postContainer');
     if (postContainer) postContainer.innerHTML = '';
 
@@ -84,6 +255,8 @@ function resetAndFetch() {
 // 게시글 목록 조회
 async function fetchPosts() {
     if (isLoading || isEnd) return;
+
+    if (!validateBoardSearchKeywordLength()) return;
 
     isLoading = true;
     setLoading(true);

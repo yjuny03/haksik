@@ -4,9 +4,153 @@
 const urlParams = new URLSearchParams(window.location.search);
 const editPostId = urlParams.get('postId');
 
+var MAX_BOARD_TITLE_LENGTH = 100;
+var MAX_BOARD_CONTENT_LENGTH = 1000;
+var BOARD_TITLE_LENGTH_ERROR = '게시글 제목은 최대 100자까지 입력할 수 있습니다.';
+var BOARD_CONTENT_LENGTH_ERROR = '게시글 내용은 최대 1000자까지 입력할 수 있습니다.';
+
+var BOARD_TOAST_COOLDOWN = 1200;
+var BOARD_INPUT_WARNING_DELAY = 600;
+var BOARD_INPUT_WARNING_COOLDOWN = 1800;
+
+window.boardToastCooldownState = window.boardToastCooldownState || {};
+window.boardInputWarningTimers = window.boardInputWarningTimers || {};
+window.boardInputWarningLastShownAt = window.boardInputWarningLastShownAt || {};
+
+// 같은 toast가 짧은 시간 안에 반복 표시되는 것을 방지
+function showBoardToastLimited(message, type, key) {
+    var toastKey = key || message;
+    var now = Date.now();
+
+    if (window.boardToastCooldownState[toastKey] && now - window.boardToastCooldownState[toastKey] < BOARD_TOAST_COOLDOWN) {
+        return;
+    }
+
+    window.boardToastCooldownState[toastKey] = now;
+
+    if (typeof showToast === 'function') {
+        showToast(message, type);
+    }
+}
+
+// input 경고 타이머 제거
+function clearBoardInputWarningTimers(id) {
+    Object.keys(window.boardInputWarningTimers).forEach(function (key) {
+        if (key.startsWith(id + ':')) {
+            clearTimeout(window.boardInputWarningTimers[key]);
+            delete window.boardInputWarningTimers[key];
+        }
+    });
+}
+
+// 정상 입력으로 돌아오면 해당 input의 경고 상태 초기화
+function clearBoardInputWarning(id) {
+    clearBoardInputWarningTimers(id);
+
+    Object.keys(window.boardInputWarningLastShownAt).forEach(function (key) {
+        if (key.startsWith(id + ':')) {
+            delete window.boardInputWarningLastShownAt[key];
+        }
+    });
+}
+
+// 입력 중 경고 toast는 debounce 후 표시
+function showBoardInputWarningOnce(id, type, message, forceShow) {
+    var key = id + ':' + type;
+    var input = document.getElementById(id);
+
+    if (!input) {
+        return;
+    }
+
+    var currentValue = input.value;
+    var delay = forceShow ? 0 : BOARD_INPUT_WARNING_DELAY;
+
+    clearBoardInputWarningTimers(id);
+
+    window.boardInputWarningTimers[key] = setTimeout(function () {
+        var latestInput = document.getElementById(id);
+
+        if (!latestInput) {
+            return;
+        }
+
+        if (latestInput.value !== currentValue) {
+            return;
+        }
+
+        var now = Date.now();
+
+        if (window.boardInputWarningLastShownAt[key] && now - window.boardInputWarningLastShownAt[key] < BOARD_INPUT_WARNING_COOLDOWN) {
+            return;
+        }
+
+        window.boardInputWarningLastShownAt[key] = now;
+        showBoardToastLimited(message, 'warning', key);
+    }, delay);
+}
+
+// 입력 중 안내 검증
+function checkBoardInputWarning(input, id, options, forceShow) {
+    var value = input.value;
+
+    if (!value) {
+        clearBoardInputWarning(id);
+        return;
+    }
+
+    if (options.maxLength && value.length > options.maxLength) {
+        showBoardInputWarningOnce(id, 'length', options.message, forceShow === true);
+        return;
+    }
+
+    clearBoardInputWarning(id);
+}
+
+// 입력창에 입력 중 안내 검증 적용
+function addBoardInputWarning(id, options) {
+    var input = document.getElementById(id);
+
+    if (!input) {
+        return;
+    }
+
+    if (options && options.maxLength) {
+        input.removeAttribute('maxlength');
+    }
+
+    if (input.dataset.boardInputWarningInitBound === 'true') {
+        return;
+    }
+
+    input.dataset.boardInputWarningInitBound = 'true';
+
+    var isComposing = false;
+
+    input.addEventListener('compositionstart', function () {
+        isComposing = true;
+    });
+
+    input.addEventListener('compositionend', function () {
+        isComposing = false;
+        checkBoardInputWarning(input, id, options, false);
+    });
+
+    input.addEventListener('input', function () {
+        if (isComposing) {
+            return;
+        }
+
+        checkBoardInputWarning(input, id, options, false);
+    });
+}
+
+
 document.addEventListener('DOMContentLoaded', function () {
     const writeForm = document.getElementById('writeForm');
     const anonymousCheck = document.getElementById('anonymousCheck');
+
+    initBoardWriteInputWarnings();
 
     if (anonymousCheck) {
         anonymousCheck.addEventListener('change', function () {
@@ -23,6 +167,31 @@ document.addEventListener('DOMContentLoaded', function () {
         setupEditMode();
     }
 });
+
+
+// 게시글 작성/수정 입력창 입력 중 안내 검증 초기화
+function initBoardWriteInputWarnings() {
+    addBoardInputWarning('title', {
+        maxLength: MAX_BOARD_TITLE_LENGTH,
+        message: BOARD_TITLE_LENGTH_ERROR
+    });
+
+    addBoardInputWarning('content', {
+        maxLength: MAX_BOARD_CONTENT_LENGTH,
+        message: BOARD_CONTENT_LENGTH_ERROR
+    });
+}
+
+// 게시글 작성/수정 최종 글자 수 검사
+function validateBoardWriteTextLength(input, maxLength, errorMessage, toastKey) {
+    if (input && input.value.length > maxLength) {
+        showBoardToastLimited(errorMessage, 'error', toastKey);
+        input.focus();
+        return false;
+    }
+
+    return true;
+}
 
 // 기존 게시글 땡겨와서 세팅하기
 async function setupEditMode() {
@@ -57,11 +226,21 @@ async function submitPost(event) {
     event.preventDefault();
 
     const form = document.getElementById('writeForm');
-    const title = document.getElementById('title').value.trim();
-    const content = document.getElementById('content').value.trim();
+    const titleInput = document.getElementById('title');
+    const contentInput = document.getElementById('content');
+    const title = titleInput.value.trim();
+    const content = contentInput.value.trim();
 
     if (!title || !content) {
         if (typeof showToast === 'function') showToast('제목과 내용을 입력해주세요.', 'error');
+        return;
+    }
+
+    if (!validateBoardWriteTextLength(titleInput, MAX_BOARD_TITLE_LENGTH, BOARD_TITLE_LENGTH_ERROR, 'board-title-length')) {
+        return;
+    }
+
+    if (!validateBoardWriteTextLength(contentInput, MAX_BOARD_CONTENT_LENGTH, BOARD_CONTENT_LENGTH_ERROR, 'board-content-length')) {
         return;
     }
 
