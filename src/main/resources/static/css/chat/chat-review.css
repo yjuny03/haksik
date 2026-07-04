@@ -281,8 +281,8 @@
 }
 
 .review-cancel-button {
-    background-color: var(--card);
-    color: var(--forest);
+    background-color: var(--red);
+    color: white;
 }
 
 .review-submit-button {
