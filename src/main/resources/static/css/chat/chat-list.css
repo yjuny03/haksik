@@ -150,8 +150,8 @@
 }
 
 .room-status.closed {
-    background-color: var(--ivory2);
-    color: var(--muted);
+    background-color: #df4a5f;
+    color: white;
 }
 
 .empty-message {

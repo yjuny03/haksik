@@ -203,8 +203,8 @@
 }
 
 .chat-form-cancel-button {
-    background-color: var(--card);
-    color: var(--forest);
+    background-color: var(--red);
+    color: white;
 }
 
 .chat-form-submit-button {
@@ -464,8 +464,8 @@
 }
 
 .custom-place-actions button:first-child {
-    background-color: var(--card);
-    color: var(--forest);
+    background-color: var(--red);
+    color: white;
 }
 
 .custom-place-actions button:last-child {
@@ -1139,8 +1139,8 @@
 }
 
 .time-option-panel-actions button:first-child {
-    background-color: var(--paper);
-    color: var(--forest);
+    background-color: var(--red);
+    color: white;
 }
 
 .time-option-panel-actions button:last-child {

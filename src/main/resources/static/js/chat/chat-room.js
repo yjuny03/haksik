@@ -3,11 +3,182 @@ let currentLoginMemberId = null;
 let chatStompClient = null;
 let chatSocketConnected = false;
 let lastSentReadMessageId = null;
+let chatRoomEnding = false;
+let messageRestSending = false;
+let chatImageSending = false;
+let inviteMemberSubmitting = false;
 
 const MAX_CHAT_MESSAGE_LENGTH = 500;
 const CHAT_MESSAGE_LENGTH_ERROR = "채팅 메시지는 최대 500자까지 입력할 수 있습니다.";
-const MAX_INVITE_NICKNAME_LENGTH = 50;
-const INVITE_NICKNAME_LENGTH_ERROR = "닉네임은 최대 50자까지 입력할 수 있습니다.";
+const MAX_INVITE_NICKNAME_LENGTH = 10;
+const INVITE_NICKNAME_LENGTH_ERROR = "닉네임은 최대 10자까지 입력할 수 있습니다.";
+var TOAST_COOLDOWN = 1200;
+var INPUT_WARNING_DELAY = 600;
+var INPUT_WARNING_COOLDOWN = 1800;
+
+window.toastCooldownState = window.toastCooldownState || {};
+window.inputWarningTimers = window.inputWarningTimers || {};
+window.inputWarningLastShownAt = window.inputWarningLastShownAt || {};
+window.inputWarningSequence = window.inputWarningSequence || 0;
+
+// 같은 toast가 짧은 시간 안에 반복 표시되는 것을 방지
+function showToastLimited(message, type, key) {
+    var toastKey = key || message;
+    var now = Date.now();
+
+    if (window.toastCooldownState[toastKey] && now - window.toastCooldownState[toastKey] < TOAST_COOLDOWN) {
+        return;
+    }
+
+    window.toastCooldownState[toastKey] = now;
+    showToast(message, type);
+}
+
+// input 경고 타이머 제거
+function clearInputWarningTimers(id) {
+    Object.keys(window.inputWarningTimers).forEach(function (key) {
+        if (key.startsWith(id + ":")) {
+            clearTimeout(window.inputWarningTimers[key]);
+            delete window.inputWarningTimers[key];
+        }
+    });
+}
+
+// 정상 입력으로 돌아오면 해당 input의 경고 상태 초기화
+function clearInputWarning(id) {
+    clearInputWarningTimers(id);
+
+    Object.keys(window.inputWarningLastShownAt).forEach(function (key) {
+        if (key.startsWith(id + ":")) {
+            delete window.inputWarningLastShownAt[key];
+        }
+    });
+}
+
+// 입력 중 경고 toast는 debounce 후 표시
+function showInputWarningOnce(id, type, message, forceShow) {
+    var key = id + ":" + type;
+    var input = document.getElementById(id) || document.querySelector('[data-input-warning-id="' + id + '"]');
+
+    if (!input) {
+        return;
+    }
+
+    var currentValue = input.value;
+    var delay = forceShow ? 0 : INPUT_WARNING_DELAY;
+
+    clearInputWarningTimers(id);
+
+    window.inputWarningTimers[key] = setTimeout(function () {
+        var latestInput = document.getElementById(id) || document.querySelector('[data-input-warning-id="' + id + '"]');
+
+        if (!latestInput) {
+            return;
+        }
+
+        var latestValue = latestInput.value;
+
+        if (latestValue !== currentValue) {
+            return;
+        }
+
+        var now = Date.now();
+
+        if (window.inputWarningLastShownAt[key] && now - window.inputWarningLastShownAt[key] < INPUT_WARNING_COOLDOWN) {
+            return;
+        }
+
+        window.inputWarningLastShownAt[key] = now;
+        showToastLimited(message, "warning", key);
+    }, delay);
+}
+
+// 입력 중 안내 검증
+function checkInputWarning(input, id, options, forceShow) {
+    var value = input.value;
+
+    if (!value) {
+        clearInputWarning(id);
+        return;
+    }
+
+    if (options.maxLength && value.length > options.maxLength) {
+        showInputWarningOnce(id, "length", options.message, forceShow === true);
+        return;
+    }
+
+    if (options.pattern && !options.pattern.test(value)) {
+        showInputWarningOnce(id, "pattern", options.message, forceShow === true);
+        return;
+    }
+
+    clearInputWarning(id);
+}
+
+// 같은 이벤트 리스너가 여러 번 등록되는 것을 방지
+function bindEventOnce(element, eventName, bindKey, handler) {
+    if (!element) {
+        return;
+    }
+
+    if (element.dataset[bindKey] === "true") {
+        return;
+    }
+
+    element.dataset[bindKey] = "true";
+    element.addEventListener(eventName, handler);
+}
+
+// 입력창에 입력 중 안내 검증 적용
+function addInputWarning(id, options) {
+    var input = document.getElementById(id);
+    addInputWarningToElement(input, id, options);
+}
+
+// 동적으로 생성되는 입력창에 입력 중 안내 검증 적용
+function addInputWarningToElement(input, id, options) {
+    if (!input) {
+        return;
+    }
+
+    if (options && options.maxLength) {
+        input.removeAttribute("maxlength");
+    }
+
+    var warningId = id || input.dataset.inputWarningId;
+
+    if (!warningId) {
+        window.inputWarningSequence += 1;
+        warningId = "inputWarning" + window.inputWarningSequence;
+        input.dataset.inputWarningId = warningId;
+    }
+
+    if (input.dataset.inputWarningInitBound === "true") {
+        return;
+    }
+
+    input.dataset.inputWarningInitBound = "true";
+
+    var isComposing = false;
+
+    bindEventOnce(input, "compositionstart", "compositionStartBound", function () {
+        isComposing = true;
+    });
+
+    bindEventOnce(input, "compositionend", "compositionEndBound", function () {
+        isComposing = false;
+        checkInputWarning(input, warningId, options, false);
+    });
+
+    bindEventOnce(input, "input", "inputWarningBound", function () {
+        if (isComposing) {
+            return;
+        }
+
+        checkInputWarning(input, warningId, options, false);
+    });
+}
+
 
 document.addEventListener("DOMContentLoaded", function () {
     loadChatRoomDetail()
@@ -19,22 +190,40 @@ document.addEventListener("DOMContentLoaded", function () {
     const messageForm = document.getElementById("messageForm");
 
     if (messageForm) {
-        messageForm.addEventListener("submit", function (event) {
-            event.preventDefault();
-            submitMessageForm();
-        });
+        if (messageForm.dataset.submitBound !== "true") {
+            messageForm.dataset.submitBound = "true";
+            messageForm.addEventListener("submit", function (event) {
+                event.preventDefault();
+                submitMessageForm();
+            });
+        }
 
         initChatPlusMenu();
         if (typeof initChatFormUi === "function") {
             initChatFormUi();
         }
+
+        initChatRoomInputWarnings();
     }
 });
+
+// 채팅방 입력창 입력 중 안내 검증 초기화
+function initChatRoomInputWarnings() {
+    addInputWarning("messageInput", {
+        maxLength: MAX_CHAT_MESSAGE_LENGTH,
+        message: CHAT_MESSAGE_LENGTH_ERROR
+    });
+
+    addInputWarning("inviteNicknameInput", {
+        maxLength: MAX_INVITE_NICKNAME_LENGTH,
+        message: INVITE_NICKNAME_LENGTH_ERROR
+    });
+}
 
 // 채팅 메시지 길이 검사
 function validateChatMessageLength(message) {
     if (message && message.length > MAX_CHAT_MESSAGE_LENGTH) {
-        showToast(CHAT_MESSAGE_LENGTH_ERROR, "error");
+        showToastLimited(CHAT_MESSAGE_LENGTH_ERROR, "error", "chat-message-length");
         return false;
     }
 
@@ -44,7 +233,7 @@ function validateChatMessageLength(message) {
 // 초대 닉네임 길이 검사
 function validateInviteNicknameLength(nickname) {
     if (nickname && nickname.length > MAX_INVITE_NICKNAME_LENGTH) {
-        showToast(INVITE_NICKNAME_LENGTH_ERROR, "error");
+        showToastLimited(INVITE_NICKNAME_LENGTH_ERROR, "error", "invite-nickname-length");
         return false;
     }
 
@@ -56,7 +245,7 @@ function getChatRoomId() {
     const chatShell = document.querySelector(".chat-shell");
 
     if (!chatShell) {
-        showToast("채팅방 정보를 찾을 수 없습니다.", "error");
+        showToastLimited("채팅방 정보를 찾을 수 없습니다.", "error");
         return null;
     }
 
@@ -86,7 +275,7 @@ function loadChatRoomDetail() {
             return roomDetail;
         })
         .catch(function () {
-            showToast("채팅방 정보를 불러오지 못했습니다.", "error");
+            showToastLimited("채팅방 정보를 불러오지 못했습니다.", "error");
             return null;
         });
 }
@@ -175,6 +364,12 @@ async function endChatRoom() {
         return;
     }
 
+    if (chatRoomEnding) {
+        return;
+    }
+
+    chatRoomEnding = true;
+
     fetch("/api/chat/rooms/" + chatRoomId + "/end", {
         method: "POST"
     })
@@ -192,7 +387,10 @@ async function endChatRoom() {
             applyChatRoomDetail(roomDetail);
         })
         .catch(function () {
-            showToast("채팅방 종료에 실패했습니다.", "error");
+            showToastLimited("채팅방 종료에 실패했습니다.", "error");
+        })
+        .finally(function () {
+            chatRoomEnding = false;
         });
 }
 
@@ -270,7 +468,7 @@ function sendMessage() {
     }
 
     if (currentChatRoomDetail && currentChatRoomDetail.roomStatus === "CLOSED") {
-        showToast("종료된 채팅방에는 메시지를 보낼 수 없습니다.", "error");
+        showToastLimited("종료된 채팅방에는 메시지를 보낼 수 없습니다.", "error");
         return;
     }
 
@@ -289,6 +487,18 @@ function sendMessage() {
     if (sendSocketTextMessage(chatRoomId, message)) {
         messageInput.value = "";
         return;
+    }
+
+    if (messageRestSending) {
+        return;
+    }
+
+    messageRestSending = true;
+
+    const sendButton = document.getElementById("sendButton");
+
+    if (sendButton) {
+        sendButton.disabled = true;
     }
 
     fetch("/api/chat/rooms/" + chatRoomId + "/messages", {
@@ -313,7 +523,14 @@ function sendMessage() {
             sendReadForLatestMessage();
         })
         .catch(function () {
-            showToast("메시지를 전송하지 못했습니다.", "error");
+            showToastLimited("메시지를 전송하지 못했습니다.", "error");
+        })
+        .finally(function () {
+            messageRestSending = false;
+
+            if (sendButton && !(currentChatRoomDetail && currentChatRoomDetail.roomStatus === "CLOSED")) {
+                sendButton.disabled = false;
+            }
         });
 }
 
@@ -330,6 +547,12 @@ function initChatPlusMenu() {
     if (!chatPlusButton || !chatPlusMenu) {
         return;
     }
+
+    if (chatPlusButton.dataset.plusMenuBound === "true") {
+        return;
+    }
+
+    chatPlusButton.dataset.plusMenuBound = "true";
 
     chatPlusButton.addEventListener("click", function (event) {
         event.preventDefault();
@@ -403,7 +626,7 @@ function sendChatImage() {
     }
 
     if (currentChatRoomDetail && currentChatRoomDetail.roomStatus === "CLOSED") {
-        showToast("종료된 채팅방에는 이미지를 보낼 수 없습니다.", "error");
+        showToastLimited("종료된 채팅방에는 이미지를 보낼 수 없습니다.", "error");
         return;
     }
 
@@ -420,10 +643,16 @@ function sendChatImage() {
     }
 
     if (!file.type || !file.type.startsWith("image/")) {
-        showToast("이미지 파일만 선택할 수 있습니다.", "error");
+        showToastLimited("이미지 파일만 선택할 수 있습니다.", "error");
         chatImageInput.value = "";
         return;
     }
+
+    if (chatImageSending) {
+        return;
+    }
+
+    chatImageSending = true;
 
     const formData = new FormData();
     formData.append("file", file);
@@ -434,7 +663,7 @@ function sendChatImage() {
     })
         .then(function (response) {
             if (!response.ok) {
-                showToast("이미지 전송 실패 상태코드: " + response.status, "error");
+                showToastLimited("이미지 전송 실패 상태코드: " + response.status, "error");
                 throw new Error();
             }
 
@@ -450,7 +679,10 @@ function sendChatImage() {
         })
         .catch(function () {
             chatImageInput.value = "";
-            showToast("이미지 전송에 실패했습니다.", "error");
+            showToastLimited("이미지 전송에 실패했습니다.", "error");
+        })
+        .finally(function () {
+            chatImageSending = false;
         });
 }
 
@@ -507,7 +739,7 @@ function openInviteMemberModal() {
     closeChatPlusMenu();
 
     if (!canInviteGroupDateMember(currentChatRoomDetail)) {
-        showToast("과팅 대표자만 초대할 수 있습니다.", "error");
+        showToastLimited("과팅 대표자만 초대할 수 있습니다.", "error");
         return;
     }
 
@@ -553,16 +785,33 @@ function submitInviteMember() {
     }
 
     if (!canInviteGroupDateMember(currentChatRoomDetail)) {
-        showToast("과팅 대표자만 초대할 수 있습니다.", "error");
+        showToastLimited("과팅 대표자만 초대할 수 있습니다.", "error");
         return;
     }
 
     const nickname = nicknameInput.value.trim();
 
     if (nickname === "") {
-        showToast("초대할 닉네임을 입력해 주세요.", "error");
+        showToastLimited("초대할 닉네임을 입력해 주세요.", "error");
         nicknameInput.focus();
         return;
+    }
+
+    if (!validateInviteNicknameLength(nickname)) {
+        nicknameInput.focus();
+        return;
+    }
+
+    if (inviteMemberSubmitting) {
+        return;
+    }
+
+    inviteMemberSubmitting = true;
+
+    const submitButton = document.querySelector(".invite-submit-button");
+
+    if (submitButton) {
+        submitButton.disabled = true;
     }
 
     fetch("/api/chat/rooms/" + chatRoomId + "/invite", {
@@ -582,13 +831,20 @@ function submitInviteMember() {
             return response.json();
         })
         .then(function () {
-            showToast("초대 알림을 보냈습니다.", "success");
+            showToastLimited("초대 알림을 보냈습니다.", "success");
             closeInviteMemberModal();
 
             // 알림 수락 전에는 참여자가 아니므로 여기서 참여자 목록을 다시 불러오지 않음
         })
         .catch(function () {
-            showToast("초대 알림 전송에 실패했습니다. 닉네임, 이미 참여 중인지, 이미 초대된 상태인지 확인해 주세요.", "error");
+            showToastLimited("초대 알림 전송에 실패했습니다. 닉네임, 이미 참여 중인지, 이미 초대된 상태인지 확인해 주세요.", "error");
+        })
+        .finally(function () {
+            inviteMemberSubmitting = false;
+
+            if (submitButton) {
+                submitButton.disabled = false;
+            }
         });
 }
 
@@ -608,7 +864,7 @@ function loadChatRoomMembers() {
             renderChatRoomMembers(members);
         })
         .catch(function () {
-            showToast("참여자 목록을 불러오지 못했습니다.", "error");
+            showToastLimited("참여자 목록을 불러오지 못했습니다.", "error");
         });
 }
 
@@ -685,6 +941,7 @@ function closeMessageForm() {
     const messageInput = document.getElementById("messageInput");
     const sendButton = document.getElementById("sendButton");
     const chatPlusButton = document.getElementById("chatPlusButton");
+    const chatPlusArea = document.querySelector(".chat-plus-area");
     const chatPlusMenu = document.getElementById("chatPlusMenu");
 
     if (messageForm) {
@@ -702,6 +959,10 @@ function closeMessageForm() {
 
     if (chatPlusButton) {
         chatPlusButton.disabled = true;
+    }
+
+    if (chatPlusArea) {
+        chatPlusArea.classList.add("hidden");
     }
 
     if (chatPlusMenu) {
