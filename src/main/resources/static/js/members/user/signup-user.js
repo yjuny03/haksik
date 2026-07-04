@@ -1,94 +1,155 @@
 // signup-user.js
 
-let loginIdChecked = false;
-let nicknameChecked = false;
+var loginIdChecked = false;
+var nicknameChecked = false;
 
-let sentEmail = '';
-let verifiedSchoolName = '';
+var sentEmail = '';
+var verifiedSchoolName = '';
+var currentTermCheckbox = null;
 
-const inputWarningState = {};
+// toast 중복 방지 / 입력 경고 debounce 상태
+var inputWarningTimers = {};
+var inputWarningLastShownAt = {};
+var inputWarningLastValue = {};
+var toastCooldownState = {};
+
+// 요청 중복 방지 상태
+var duplicateCheckingState = {};
+var emailSending = false;
+var emailVerifying = false;
+var signupSubmitting = false;
+
+var INPUT_WARNING_DELAY = 600;
+var INPUT_WARNING_COOLDOWN = 1800;
+var TOAST_COOLDOWN = 1200;
 
 document.addEventListener('DOMContentLoaded', function () {
-    const signupForm = document.getElementById('signupForm');
-    const loginIdInput = document.getElementById('loginId');
-    const nicknameInput = document.getElementById('nickname');
-    const modalEmailInput = document.getElementById('modalEmail');
+    var signupForm = document.getElementById('signupForm');
+    var loginIdInput = document.getElementById('loginId');
+    var nicknameInput = document.getElementById('nickname');
+    var modalEmailInput = document.getElementById('modalEmail');
 
     setupSignupInputRules();
 
-    const emailModalOpenBtn = document.getElementById('emailModalOpenBtn');
-    const emailModalCloseBtn = document.getElementById('emailModalCloseBtn');
-    const emailSendBtn = document.getElementById('emailSendBtn');
-    const emailVerifyBtn = document.getElementById('emailVerifyBtn');
+    var emailModalOpenBtn = document.getElementById('emailModalOpenBtn');
+    var emailModalCloseBtn = document.getElementById('emailModalCloseBtn');
+    var emailSendBtn = document.getElementById('emailSendBtn');
+    var emailVerifyBtn = document.getElementById('emailVerifyBtn');
 
-    if (loginIdInput) {
-        loginIdInput.addEventListener('input', function () {
-            loginIdChecked = false;
-            resetDuplicateButton('loginId');
-        });
-    }
+    bindEventOnce(loginIdInput, 'input', 'loginIdResetBound', function () {
+        loginIdChecked = false;
+        resetDuplicateButton('loginId');
+    });
 
-    if (nicknameInput) {
-        nicknameInput.addEventListener('input', function () {
-            nicknameChecked = false;
-            resetDuplicateButton('nickname');
-        });
-    }
+    bindEventOnce(nicknameInput, 'input', 'nicknameResetBound', function () {
+        nicknameChecked = false;
+        resetDuplicateButton('nickname');
+    });
 
-    if (modalEmailInput) {
-        modalEmailInput.addEventListener('input', resetEmailVerificationState);
-    }
-
-    if (emailModalOpenBtn) {
-        emailModalOpenBtn.addEventListener('click', openEmailModal);
-    }
-
-    if (emailModalCloseBtn) {
-        emailModalCloseBtn.addEventListener('click', closeEmailModal);
-    }
-
-    if (emailSendBtn) {
-        emailSendBtn.addEventListener('click', sendEmailCode);
-    }
-
-    if (emailVerifyBtn) {
-        emailVerifyBtn.addEventListener('click', verifyEmailCode);
-    }
+    bindEventOnce(modalEmailInput, 'input', 'emailResetBound', resetEmailVerificationState);
+    bindEventOnce(emailModalOpenBtn, 'click', 'emailModalOpenBound', openEmailModal);
+    bindEventOnce(emailModalCloseBtn, 'click', 'emailModalCloseBound', closeEmailModal);
+    bindEventOnce(emailSendBtn, 'click', 'emailSendBound', sendEmailCode);
+    bindEventOnce(emailVerifyBtn, 'click', 'emailVerifyBound', verifyEmailCode);
 
     document.querySelectorAll('[data-check-type]').forEach(function (button) {
-        button.addEventListener('click', function () {
+        bindEventOnce(button, 'click', 'duplicateCheckBound', function () {
             checkDuplicate(this.dataset.checkType);
         });
     });
 
-    if (signupForm) {
-        signupForm.addEventListener('submit', signupUser);
-    }
+    bindEventOnce(signupForm, 'submit', 'signupSubmitBound', signupUser);
+
+    var termsAgreeBtn = document.getElementById('termsAgreeBtn');
+    bindEventOnce(termsAgreeBtn, 'click', 'termsAgreeBound', function () {
+        if (currentTermCheckbox) {
+            currentTermCheckbox.checked = true;
+        }
+
+        closeTermsModal();
+    });
 });
+
+// 같은 이벤트가 여러 번 붙는 것 방지
+function bindEventOnce(element, eventName, bindKey, handler) {
+    if (!element) {
+        return;
+    }
+
+    if (element.dataset[bindKey] === 'true') {
+        return;
+    }
+
+    element.dataset[bindKey] = 'true';
+    element.addEventListener(eventName, handler);
+}
+
+// 같은 toast가 짧은 시간 안에 계속 쌓이는 것 방지
+function showToastLimited(message, type, key) {
+    var toastKey = key || message;
+    var now = Date.now();
+
+    if (toastCooldownState[toastKey] && now - toastCooldownState[toastKey] < TOAST_COOLDOWN) {
+        return;
+    }
+
+    toastCooldownState[toastKey] = now;
+    showToast(message, type);
+}
 
 // 이메일 인증 모달 열기
 function openEmailModal() {
-    document.getElementById('emailModal').classList.add('active');
+    var modal = document.getElementById('emailModal');
+
+    if (!modal) {
+        return;
+    }
+
+    modal.classList.add('active');
 }
 
 // 이메일 인증 모달 닫기
 function closeEmailModal() {
-    document.getElementById('emailModal').classList.remove('active');
+    var modal = document.getElementById('emailModal');
+
+    if (!modal) {
+        return;
+    }
+
+    modal.classList.remove('active');
 }
 
 // 이메일 인증 상태 초기화
 function resetEmailVerificationState() {
-    document.getElementById('schoolId').value = '';
-    document.getElementById('schoolEmail').value = '';
-    document.getElementById('emailVerified').value = 'false';
+    var schoolIdInput = document.getElementById('schoolId');
+    var schoolEmailInput = document.getElementById('schoolEmail');
+    var emailVerifiedInput = document.getElementById('emailVerified');
+    var verifiedBox = document.getElementById('verifiedBox');
+    var verifiedText = document.getElementById('verifiedText');
+    var verifyBtn = document.getElementById('emailVerifyBtn');
+
+    if (schoolIdInput) {
+        schoolIdInput.value = '';
+    }
+
+    if (schoolEmailInput) {
+        schoolEmailInput.value = '';
+    }
+
+    if (emailVerifiedInput) {
+        emailVerifiedInput.value = 'false';
+    }
 
     sentEmail = '';
     verifiedSchoolName = '';
 
-    document.getElementById('verifiedBox').classList.remove('active');
-    document.getElementById('verifiedText').innerText = '';
+    if (verifiedBox) {
+        verifiedBox.classList.remove('active');
+    }
 
-    const verifyBtn = document.getElementById('emailVerifyBtn');
+    if (verifiedText) {
+        verifiedText.innerText = '';
+    }
 
     if (verifyBtn) {
         verifyBtn.innerText = '확인';
@@ -98,7 +159,7 @@ function resetEmailVerificationState() {
 
 // 중복확인 버튼 초기화
 function resetDuplicateButton(type) {
-    const button = document.querySelector('[data-check-type="' + type + '"]');
+    var button = document.querySelector('[data-check-type="' + type + '"]');
 
     if (!button) {
         return;
@@ -110,7 +171,7 @@ function resetDuplicateButton(type) {
 
 // 중복확인 버튼 완료 처리
 function completeDuplicateButton(type) {
-    const button = document.querySelector('[data-check-type="' + type + '"]');
+    var button = document.querySelector('[data-check-type="' + type + '"]');
 
     if (!button) {
         return;
@@ -122,8 +183,6 @@ function completeDuplicateButton(type) {
 
 // 회원가입 입력값 안내 설정
 function setupSignupInputRules() {
-    // 전화번호만 입력 중 자동 포맷을 적용하고, 나머지는 입력값을 지우지 않음
-
     addInputWarning('loginId', {
         maxLength: 20,
         pattern: /^[a-zA-Z0-9]*$/,
@@ -177,13 +236,19 @@ function setupSignupInputRules() {
 
 // 입력값은 건드리지 않고 조건 위반 시 toast만 띄움
 function addInputWarning(id, options) {
-    const input = document.getElementById(id);
+    var input = document.getElementById(id);
 
     if (!input) {
         return;
     }
 
-    let isComposing = false;
+    if (input.dataset.warningBound === 'true') {
+        return;
+    }
+
+    input.dataset.warningBound = 'true';
+
+    var isComposing = false;
 
     input.addEventListener('compositionstart', function () {
         isComposing = true;
@@ -207,8 +272,8 @@ function addInputWarning(id, options) {
     });
 }
 
-function checkInputWarning(input, id, options, forceShow = false) {
-    const value = input.value;
+function checkInputWarning(input, id, options, forceShow) {
+    var value = input.value;
 
     if (!value) {
         clearInputWarning(id);
@@ -216,49 +281,101 @@ function checkInputWarning(input, id, options, forceShow = false) {
     }
 
     if (options.maxLength && value.length > options.maxLength) {
-        showInputWarningOnce(id, 'length', options.message, forceShow);
+        showInputWarningOnce(id, 'length', options.message, forceShow === true);
         return;
     }
 
     if (options.pattern && !options.pattern.test(value)) {
-        showInputWarningOnce(id, 'pattern', options.message, forceShow);
+        showInputWarningOnce(id, 'pattern', options.message, forceShow === true);
         return;
     }
 
     clearInputWarning(id);
 }
 
-// 같은 입력창에서 toast가 계속 뜨는 것 방지
-function showInputWarningOnce(id, type, message, forceShow = false) {
-    const key = id + ':' + type;
+// 빠르게 입력 중이면 기다렸다가 한 번만 보여주고, 계속 틀리면 일정 시간 뒤 다시 보여줌
+function showInputWarningOnce(id, type, message, forceShow) {
+    var key = id + ':' + type;
+    var input = document.getElementById(id);
 
-    if (!forceShow && inputWarningState[key]) {
+    if (!input) {
         return;
     }
 
-    inputWarningState[key] = true;
-    showToast(message, 'warning');
+    var currentValue = input.value;
+    var delay = forceShow ? 0 : INPUT_WARNING_DELAY;
+
+    clearInputWarningTimers(id);
+
+    inputWarningTimers[key] = setTimeout(function () {
+        var latestInput = document.getElementById(id);
+
+        if (!latestInput) {
+            return;
+        }
+
+        var latestValue = latestInput.value;
+
+        // 타이머가 기다리는 동안 값이 바뀌었으면 예전 경고는 무시
+        if (latestValue !== currentValue) {
+            return;
+        }
+
+        var now = Date.now();
+
+        // 같은 입력창의 같은 오류가 너무 자주 뜨는 것 방지
+        if (inputWarningLastShownAt[key] && now - inputWarningLastShownAt[key] < INPUT_WARNING_COOLDOWN) {
+            return;
+        }
+
+        inputWarningLastValue[key] = latestValue;
+        inputWarningLastShownAt[key] = now;
+        showToastLimited(message, 'warning', key);
+    }, delay);
+}
+
+function clearInputWarningTimers(id) {
+    Object.keys(inputWarningTimers).forEach(function (key) {
+        if (key.startsWith(id + ':')) {
+            clearTimeout(inputWarningTimers[key]);
+            delete inputWarningTimers[key];
+        }
+    });
 }
 
 function clearInputWarning(id) {
-    Object.keys(inputWarningState).forEach(function (key) {
+    clearInputWarningTimers(id);
+
+    Object.keys(inputWarningLastShownAt).forEach(function (key) {
         if (key.startsWith(id + ':')) {
-            delete inputWarningState[key];
+            delete inputWarningLastShownAt[key];
+        }
+    });
+
+    Object.keys(inputWarningLastValue).forEach(function (key) {
+        if (key.startsWith(id + ':')) {
+            delete inputWarningLastValue[key];
         }
     });
 }
 
 // 전화번호만 입력 중 자동 포맷 유지
 function setPhoneFormatRule(id) {
-    const input = document.getElementById(id);
+    var input = document.getElementById(id);
 
     if (!input) {
         return;
     }
 
+    if (input.dataset.phoneFormatBound === 'true') {
+        return;
+    }
+
+    input.dataset.phoneFormatBound = 'true';
+
     input.addEventListener('input', function () {
-        const before = input.value;
-        const nextValue = formatPhone(before);
+        var before = input.value;
+        var nextValue = formatPhone(before);
 
         if (before === nextValue) {
             return;
@@ -277,15 +394,15 @@ function setupPasswordToggleButtons() {
 
         button.dataset.bound = 'true';
 
-        const targetId = button.dataset.target;
-        const input = document.getElementById(targetId);
+        var targetId = button.dataset.target;
+        var input = document.getElementById(targetId);
 
         if (!input) {
             return;
         }
 
         button.addEventListener('click', function () {
-            const isPassword = input.type === 'password';
+            var isPassword = input.type === 'password';
 
             input.type = isPassword ? 'text' : 'password';
             button.innerText = isPassword ? '숨김' : '보기';
@@ -297,7 +414,7 @@ function setupPasswordToggleButtons() {
 // 01012345678 -> 010-1234-5678
 // 050712345678 -> 0507-1234-5678
 function formatPhone(value) {
-    const numbers = value.replace(/\D/g, '').slice(0, 12);
+    var numbers = value.replace(/\D/g, '').slice(0, 12);
 
     if (numbers.startsWith('0507')) {
         if (numbers.length <= 4) {
@@ -329,8 +446,8 @@ function normalizePhone(value) {
 
 // 생년월일 과거 날짜 검증
 function isPastDate(value) {
-    const selectedDate = new Date(value);
-    const today = new Date();
+    var selectedDate = new Date(value);
+    var today = new Date();
 
     selectedDate.setHours(0, 0, 0, 0);
     today.setHours(0, 0, 0, 0);
@@ -364,7 +481,7 @@ function validateSignupInput(data) {
         return '생년월일은 오늘보다 이전 날짜여야 합니다.';
     }
 
-    const phoneNumbers = normalizePhone(data.phone);
+    var phoneNumbers = normalizePhone(data.phone);
 
     if (!/^(01[016789]\d{7,8}|0507\d{8})$/.test(phoneNumbers)) {
         return '전화번호는 010-1234-5678 또는 0507-1234-5678 형식으로 입력해주세요.';
@@ -410,191 +527,300 @@ function getErrorMessage(result, fallback) {
 
 // 이메일 인증번호 전송
 async function sendEmailCode() {
-    const email = document.getElementById('modalEmail').value.trim();
+    if (emailSending) {
+        return;
+    }
+
+    var emailInput = document.getElementById('modalEmail');
+    var sendBtn = document.getElementById('emailSendBtn');
+
+    if (!emailInput) {
+        showToastLimited('이메일 입력창을 찾을 수 없습니다.', 'error', 'email-input-missing');
+        return;
+    }
+
+    var email = emailInput.value.trim();
 
     if (!email) {
-        showToast('학교 이메일을 입력해주세요.', 'error');
+        showToastLimited('학교 이메일을 입력해주세요.', 'error', 'email-empty');
         return;
     }
 
-    resetEmailVerificationState();
-    document.getElementById('modalEmail').value = email;
+    emailSending = true;
 
-    const response = await fetch('/api/auth/email/send', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            email: email
-        })
-    });
-
-    const result = await safeJson(response);
-
-    if (!response.ok || !result || result.success === false) {
-        showToast(getErrorMessage(result, '등록된 학교 이메일 도메인이 아니거나 이미 사용 중인 이메일입니다.'), 'error');
-        return;
+    if (sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.innerText = '전송중';
     }
 
-    if (!result.data || !result.data.schoolId) {
-        showToast('학교 인증 응답 데이터가 올바르지 않습니다.', 'error');
-        return;
+    try {
+        resetEmailVerificationState();
+        emailInput.value = email;
+
+        var response = await fetch('/api/auth/email/send', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                email: email
+            })
+        });
+
+        var result = await safeJson(response);
+
+        if (!response.ok || !result || result.success === false) {
+            showToastLimited(getErrorMessage(result, '등록된 학교 이메일 도메인이 아니거나 이미 사용 중인 이메일입니다.'), 'error', 'email-send-error');
+            return;
+        }
+
+        if (!result.data || !result.data.schoolId) {
+            showToastLimited('학교 인증 응답 데이터가 올바르지 않습니다.', 'error', 'email-send-invalid-response');
+            return;
+        }
+
+        document.getElementById('schoolId').value = result.data.schoolId;
+        sentEmail = email;
+        verifiedSchoolName = result.data.schoolName;
+
+        showToastLimited(verifiedSchoolName + ' 인증번호가 전송되었습니다.', 'success', 'email-send-success');
+
+    } catch (e) {
+        showToastLimited('인증번호 전송 중 오류가 발생했습니다.', 'error', 'email-send-fetch-error');
+
+    } finally {
+        emailSending = false;
+
+        if (sendBtn) {
+            sendBtn.disabled = false;
+            sendBtn.innerText = '전송';
+        }
     }
-
-    document.getElementById('schoolId').value = result.data.schoolId;
-    sentEmail = email;
-    verifiedSchoolName = result.data.schoolName;
-
-    showToast(verifiedSchoolName + ' 인증번호가 전송되었습니다.', 'success');
 }
 
 // 이메일 인증번호 확인
 async function verifyEmailCode() {
-    const email = document.getElementById('modalEmail').value.trim();
-    const code = document.getElementById('modalCode').value.trim();
-    const schoolId = document.getElementById('schoolId').value;
+    if (emailVerifying) {
+        return;
+    }
+
+    var emailInput = document.getElementById('modalEmail');
+    var codeInput = document.getElementById('modalCode');
+    var schoolIdInput = document.getElementById('schoolId');
+    var verifyBtn = document.getElementById('emailVerifyBtn');
+
+    if (!emailInput || !codeInput || !schoolIdInput) {
+        showToastLimited('이메일 인증 입력 정보를 찾을 수 없습니다.', 'error', 'email-verify-input-missing');
+        return;
+    }
+
+    var email = emailInput.value.trim();
+    var code = codeInput.value.trim();
+    var schoolId = schoolIdInput.value;
 
     if (!email || !code) {
-        showToast('이메일과 인증번호를 모두 입력해주세요.', 'error');
+        showToastLimited('이메일과 인증번호를 모두 입력해주세요.', 'error', 'email-verify-empty');
         return;
     }
 
     if (!/^\d{6}$/.test(code)) {
-        showToast('인증번호는 6자리 숫자로 입력해주세요.', 'warning');
+        showToastLimited('인증번호는 6자리 숫자로 입력해주세요.', 'warning', 'email-verify-code-invalid');
         return;
     }
 
     if (!schoolId || sentEmail !== email) {
-        showToast('먼저 현재 이메일로 인증번호 전송을 해주세요.', 'error');
+        showToastLimited('먼저 현재 이메일로 인증번호 전송을 해주세요.', 'error', 'email-verify-not-sent');
         return;
     }
 
-    const response = await fetch('/api/auth/email/verify', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            email: email,
-            code: code
-        })
-    });
+    emailVerifying = true;
 
-    const result = await safeJson(response);
-
-    if (!response.ok || (result && result.success === false)) {
-        showToast(getErrorMessage(result, '인증번호를 확인해주세요.'), 'error');
-        return;
+    if (verifyBtn) {
+        verifyBtn.disabled = true;
+        verifyBtn.innerText = '확인중';
     }
 
-    document.getElementById('schoolEmail').value = email;
-    document.getElementById('emailVerified').value = 'true';
+    try {
+        var response = await fetch('/api/auth/email/verify', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                email: email,
+                code: code
+            })
+        });
 
-    document.getElementById('verifiedText').innerText =
-        verifiedSchoolName + ' / ' + email + ' 인증 완료';
+        var result = await safeJson(response);
 
-    document.getElementById('verifiedBox').classList.add('active');
+        if (!response.ok || (result && result.success === false)) {
+            showToastLimited(getErrorMessage(result, '인증번호를 확인해주세요.'), 'error', 'email-verify-error');
+            return;
+        }
 
-    const verifyBtn = document.getElementById('emailVerifyBtn');
-    verifyBtn.innerText = '완료';
-    verifyBtn.classList.add('success');
+        document.getElementById('schoolEmail').value = email;
+        document.getElementById('emailVerified').value = 'true';
 
-    showToast('학교 이메일 인증이 완료되었습니다.', 'success');
+        document.getElementById('verifiedText').innerText =
+            verifiedSchoolName + ' / ' + email + ' 인증 완료';
 
-    setTimeout(function () {
-        closeEmailModal();
-    }, 700);
+        document.getElementById('verifiedBox').classList.add('active');
+
+        if (verifyBtn) {
+            verifyBtn.innerText = '완료';
+            verifyBtn.classList.add('success');
+        }
+
+        showToastLimited('학교 이메일 인증이 완료되었습니다.', 'success', 'email-verify-success');
+
+        setTimeout(function () {
+            closeEmailModal();
+        }, 700);
+
+    } catch (e) {
+        showToastLimited('인증번호 확인 중 오류가 발생했습니다.', 'error', 'email-verify-fetch-error');
+
+    } finally {
+        emailVerifying = false;
+
+        if (verifyBtn && verifyBtn.innerText === '확인중') {
+            verifyBtn.innerText = '확인';
+        }
+
+        if (verifyBtn) {
+            verifyBtn.disabled = false;
+        }
+    }
 }
 
 // 아이디/닉네임 중복 확인
 async function checkDuplicate(type) {
-    const target = document.getElementById(type);
+    if (duplicateCheckingState[type]) {
+        return;
+    }
+
+    var target = document.getElementById(type);
+    var button = document.querySelector('[data-check-type="' + type + '"]');
 
     if (!target) {
-        showToast('중복 확인 대상을 찾을 수 없습니다.', 'error');
+        showToastLimited('중복 확인 대상을 찾을 수 없습니다.', 'error', 'duplicate-target-error');
         return;
     }
 
-    const value = target.value.trim();
+    var value = target.value.trim();
 
     if (!value) {
-        showToast('값을 입력해주세요.', 'error');
+        showToastLimited('값을 입력해주세요.', 'error', type + ':empty');
         return;
     }
 
-    const duplicateValidationMessage = validateDuplicateValue(type, value);
+    var duplicateValidationMessage = validateDuplicateValue(type, value);
 
     if (duplicateValidationMessage) {
-        showToast(duplicateValidationMessage, 'warning');
+        showToastLimited(duplicateValidationMessage, 'warning', type + ':invalid');
         return;
     }
 
-    const url = type === 'loginId'
-        ? '/api/members/check-login-id?loginId=' + encodeURIComponent(value)
-        : '/api/members/check-nickname?nickname=' + encodeURIComponent(value);
+    duplicateCheckingState[type] = true;
 
-    const response = await fetch(url);
-    const result = await safeJson(response);
-
-    if (!response.ok || !result || result.success === false) {
-        showToast(getErrorMessage(result, '중복 확인 중 오류가 발생했습니다.'), 'error');
-        return;
+    if (button) {
+        button.disabled = true;
+        button.innerText = '확인중';
     }
 
-    if (!result.data || typeof result.data.available !== 'boolean') {
-        showToast('중복 확인 응답 데이터가 올바르지 않습니다.', 'error');
-        return;
-    }
+    try {
+        var url = type === 'loginId'
+            ? '/api/members/check-login-id?loginId=' + encodeURIComponent(value)
+            : '/api/members/check-nickname?nickname=' + encodeURIComponent(value);
 
-    if (result.data.available) {
+        var response = await fetch(url);
+        var result = await safeJson(response);
+
+        // 요청 보내는 중에 사용자가 값을 바꿨으면 이전 응답은 무시
+        if (target.value.trim() !== value) {
+            return;
+        }
+
+        if (!response.ok || !result || result.success === false) {
+            showToastLimited(getErrorMessage(result, '중복 확인 중 오류가 발생했습니다.'), 'error', type + ':server-error');
+            resetDuplicateButton(type);
+            return;
+        }
+
+        if (!result.data || typeof result.data.available !== 'boolean') {
+            showToastLimited('중복 확인 응답 데이터가 올바르지 않습니다.', 'error', type + ':invalid-response');
+            resetDuplicateButton(type);
+            return;
+        }
+
+        if (result.data.available) {
+            if (type === 'loginId') {
+                loginIdChecked = true;
+            }
+
+            if (type === 'nickname') {
+                nicknameChecked = true;
+            }
+
+            completeDuplicateButton(type);
+            showToastLimited('사용 가능한 값입니다.', 'success', type + ':available');
+            return;
+        }
+
         if (type === 'loginId') {
-            loginIdChecked = true;
+            loginIdChecked = false;
         }
 
         if (type === 'nickname') {
-            nicknameChecked = true;
+            nicknameChecked = false;
         }
 
-        completeDuplicateButton(type);
-        showToast('사용 가능한 값입니다.', 'success');
-        return;
-    }
+        resetDuplicateButton(type);
+        showToastLimited('이미 사용 중입니다.', 'error', type + ':duplicated');
 
-    if (type === 'loginId') {
-        loginIdChecked = false;
-    }
+    } catch (e) {
+        showToastLimited('중복 확인 중 오류가 발생했습니다.', 'error', type + ':fetch-error');
+        resetDuplicateButton(type);
 
-    if (type === 'nickname') {
-        nicknameChecked = false;
-    }
+    } finally {
+        duplicateCheckingState[type] = false;
 
-    resetDuplicateButton(type);
-    showToast('이미 사용 중입니다.', 'error');
+        if (button && button.innerText === '확인중') {
+            button.disabled = false;
+            button.innerText = '중복';
+        } else if (button) {
+            button.disabled = false;
+        }
+    }
 }
 
 // 일반 이용자 회원가입
 async function signupUser(event) {
     event.preventDefault();
 
-    const loginId = document.getElementById('loginId').value.trim();
-    const password = document.getElementById('password').value;
-    const passwordConfirm = document.getElementById('passwordConfirm').value;
-    const name = document.getElementById('name').value.trim();
-    const nickname = document.getElementById('nickname').value.trim();
-    const schoolId = document.getElementById('schoolId').value;
-    const department = document.getElementById('department').value.trim();
-    const schoolEmail = document.getElementById('schoolEmail').value.trim();
-    const birthDate = document.getElementById('birthDate').value;
-    const gender = document.getElementById('gender').value;
-    const phone = document.getElementById('phone').value.trim();
-
-    if (!loginId || !password || !passwordConfirm || !name || !nickname || !department || !birthDate || !gender || !phone) {
-        showToast('필수 입력값을 모두 입력해주세요.', 'error');
+    if (signupSubmitting) {
         return;
     }
 
-    const validationMessage = validateSignupInput({
+    var loginId = document.getElementById('loginId').value.trim();
+    var password = document.getElementById('password').value;
+    var passwordConfirm = document.getElementById('passwordConfirm').value;
+    var name = document.getElementById('name').value.trim();
+    var nickname = document.getElementById('nickname').value.trim();
+    var schoolId = document.getElementById('schoolId').value;
+    var department = document.getElementById('department').value.trim();
+    var schoolEmail = document.getElementById('schoolEmail').value.trim();
+    var birthDate = document.getElementById('birthDate').value;
+    var gender = document.getElementById('gender').value;
+    var phone = document.getElementById('phone').value.trim();
+
+    if (!loginId || !password || !passwordConfirm || !name || !nickname || !department || !birthDate || !gender || !phone) {
+        showToastLimited('필수 입력값을 모두 입력해주세요.', 'error', 'signup-required');
+        return;
+    }
+
+    var validationMessage = validateSignupInput({
         loginId: loginId,
         password: password,
         name: name,
@@ -605,46 +831,46 @@ async function signupUser(event) {
     });
 
     if (validationMessage) {
-        showToast(validationMessage, 'warning');
+        showToastLimited(validationMessage, 'warning', 'signup-validation');
         return;
     }
 
     if (!loginIdChecked) {
-        showToast('아이디 중복 확인을 해주세요.', 'error');
+        showToastLimited('아이디 중복 확인을 해주세요.', 'error', 'signup-loginId-check');
         return;
     }
 
     if (!nicknameChecked) {
-        showToast('닉네임 중복 확인을 해주세요.', 'error');
+        showToastLimited('닉네임 중복 확인을 해주세요.', 'error', 'signup-nickname-check');
         return;
     }
 
     if (document.getElementById('emailVerified').value !== 'true') {
-        showToast('학교 이메일 인증을 완료해주세요.', 'error');
+        showToastLimited('학교 이메일 인증을 완료해주세요.', 'error', 'signup-email-check');
         return;
     }
 
     if (!schoolId || !schoolEmail) {
-        showToast('학교 이메일 인증 정보가 없습니다. 다시 인증해주세요.', 'error');
+        showToastLimited('학교 이메일 인증 정보가 없습니다. 다시 인증해주세요.', 'error', 'signup-email-missing');
         return;
     }
 
     if (password !== passwordConfirm) {
-        showToast('비밀번호가 일치하지 않습니다.', 'error');
+        showToastLimited('비밀번호가 일치하지 않습니다.', 'error', 'signup-password-match');
         return;
     }
 
-    const termsIds = Array.from(document.querySelectorAll('input[name="termsIds"]:checked'))
+    var termsIds = Array.from(document.querySelectorAll('input[name="termsIds"]:checked'))
         .map(function (item) {
             return Number(item.value);
         });
 
     if (termsIds.length === 0) {
-        showToast('필수 약관에 동의해주세요.', 'error');
+        showToastLimited('필수 약관에 동의해주세요.', 'error', 'signup-terms');
         return;
     }
 
-    const requestData = {
+    var requestData = {
         loginId: loginId,
         password: password,
         name: name,
@@ -658,29 +884,36 @@ async function signupUser(event) {
         termsIds: termsIds
     };
 
-    const response = await fetch('/api/members/signup/user', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestData)
-    });
+    signupSubmitting = true;
 
-    const result = await safeJson(response);
+    try {
+        var response = await fetch('/api/members/signup/user', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData)
+        });
 
-    if (!response.ok || !result || result.success === false) {
-        showToast(getErrorMessage(result, '회원가입에 실패했습니다.'), 'error');
-        return;
+        var result = await safeJson(response);
+
+        if (!response.ok || !result || result.success === false) {
+            showToastLimited(getErrorMessage(result, '회원가입에 실패했습니다.'), 'error', 'signup-server-error');
+            signupSubmitting = false;
+            return;
+        }
+
+        showToastLimited('회원가입이 완료되었습니다.', 'success', 'signup-success');
+
+        setTimeout(function () {
+            location.href = '/api/view/login';
+        }, 900);
+
+    } catch (e) {
+        showToastLimited('회원가입 중 오류가 발생했습니다.', 'error', 'signup-fetch-error');
+        signupSubmitting = false;
     }
-
-    showToast('회원가입이 완료되었습니다.', 'success');
-
-    setTimeout(function () {
-        location.href = '/api/view/login';
-    }, 900);
 }
-
-let currentTermCheckbox = null;
 
 // 약관 모달 열기
 function openTermsModal(event, checkbox) {
@@ -700,20 +933,11 @@ function openTermsModal(event, checkbox) {
 
 // 약관 모달 닫기
 function closeTermsModal() {
-    document.getElementById('termsModal').classList.remove('active');
+    var termsModal = document.getElementById('termsModal');
+
+    if (termsModal) {
+        termsModal.classList.remove('active');
+    }
+
     currentTermCheckbox = null;
 }
-
-document.addEventListener('DOMContentLoaded', function () {
-    const termsAgreeBtn = document.getElementById('termsAgreeBtn');
-
-    if (termsAgreeBtn) {
-        termsAgreeBtn.addEventListener('click', function () {
-            if (currentTermCheckbox) {
-                currentTermCheckbox.checked = true;
-            }
-
-            closeTermsModal();
-        });
-    }
-});

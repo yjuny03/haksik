@@ -1,35 +1,52 @@
 // find-pw.js
 
+var findPwToastCooldownState = {};
+var findPwCodeSending = false;
+var findPwCodeVerifying = false;
+var findPwMoving = false;
+
+var FIND_PW_TOAST_COOLDOWN = 1200;
+
 document.addEventListener('DOMContentLoaded', function () {
-    const findPwForm = document.getElementById('findPwForm');
-    const sendCodeBtn = document.getElementById('sendCodeBtn');
-    const verifyBtn = document.getElementById('verifyBtn');
-    const loginIdInput = document.getElementById('loginId');
-    const emailInput = document.getElementById('email');
-    const emailCodeInput = document.getElementById('emailCode');
+    var findPwForm = document.getElementById('findPwForm');
+    var sendCodeBtn = document.getElementById('sendCodeBtn');
+    var verifyBtn = document.getElementById('verifyBtn');
+    var loginIdInput = document.getElementById('loginId');
+    var emailInput = document.getElementById('email');
 
     setupFindPwInputRules();
 
-    if (sendCodeBtn) {
-        sendCodeBtn.addEventListener('click', sendFindPwCode);
-    }
-
-    if (verifyBtn) {
-        verifyBtn.addEventListener('click', verifyFindPwCode);
-    }
-
-    if (findPwForm) {
-        findPwForm.addEventListener('submit', goToResetPw);
-    }
-
-    if (loginIdInput) {
-        loginIdInput.addEventListener('input', resetEmailVerified);
-    }
-
-    if (emailInput) {
-        emailInput.addEventListener('input', resetEmailVerified);
-    }
+    bindFindPwEventOnce(sendCodeBtn, 'click', 'findPwSendCodeBound', sendFindPwCode);
+    bindFindPwEventOnce(verifyBtn, 'click', 'findPwVerifyBound', verifyFindPwCode);
+    bindFindPwEventOnce(findPwForm, 'submit', 'findPwSubmitBound', goToResetPw);
+    bindFindPwEventOnce(loginIdInput, 'input', 'findPwLoginIdResetBound', resetEmailVerified);
+    bindFindPwEventOnce(emailInput, 'input', 'findPwEmailResetBound', resetEmailVerified);
 });
+
+function bindFindPwEventOnce(element, eventName, bindKey, handler) {
+    if (!element) {
+        return;
+    }
+
+    if (element.dataset[bindKey] === 'true') {
+        return;
+    }
+
+    element.dataset[bindKey] = 'true';
+    element.addEventListener(eventName, handler);
+}
+
+function showFindPwToastLimited(message, type, key) {
+    var toastKey = key || message;
+    var now = Date.now();
+
+    if (findPwToastCooldownState[toastKey] && now - findPwToastCooldownState[toastKey] < FIND_PW_TOAST_COOLDOWN) {
+        return;
+    }
+
+    findPwToastCooldownState[toastKey] = now;
+    showToast(message, type);
+}
 
 function setupFindPwInputRules() {
     setInputRule('loginId', 20, function (value) {
@@ -46,13 +63,19 @@ function setupFindPwInputRules() {
 }
 
 function setInputRule(id, maxLength, formatter) {
-    const input = document.getElementById(id);
+    var input = document.getElementById(id);
 
     if (!input) {
         return;
     }
 
     input.maxLength = maxLength;
+
+    if (input.dataset.findPwInputRuleBound === 'true') {
+        return;
+    }
+
+    input.dataset.findPwInputRuleBound = 'true';
 
     input.addEventListener('input', function () {
         input.value = formatter(input.value).slice(0, maxLength);
@@ -69,9 +92,13 @@ function isValidEmail(email) {
 
 // 이메일 인증 상태 초기화
 function resetEmailVerified() {
-    document.getElementById('emailVerified').value = 'false';
+    var emailVerified = document.getElementById('emailVerified');
 
-    const verifyBtn = document.getElementById('verifyBtn');
+    if (emailVerified) {
+        emailVerified.value = 'false';
+    }
+
+    var verifyBtn = document.getElementById('verifyBtn');
 
     if (verifyBtn) {
         verifyBtn.innerText = '확인';
@@ -103,117 +130,201 @@ function getErrorMessage(result, fallback) {
 
 // 비밀번호 찾기 인증번호 전송
 async function sendFindPwCode() {
-    const loginId = document.getElementById('loginId').value.trim();
-    const email = document.getElementById('email').value.trim();
-
-    if (!loginId || !email) {
-        showToast('아이디와 이메일을 모두 입력해주세요.','error');
+    if (findPwCodeSending) {
         return;
     }
+
+    var loginIdInput = document.getElementById('loginId');
+    var emailInput = document.getElementById('email');
+    var sendCodeBtn = document.getElementById('sendCodeBtn');
+
+    if (!loginIdInput || !emailInput) {
+        showFindPwToastLimited('아이디 또는 이메일 입력창을 찾을 수 없습니다.', 'error', 'find-pw-input-missing');
+        return;
+    }
+
+    var loginId = loginIdInput.value.trim();
+    var email = emailInput.value.trim();
+
+    if (!loginId || !email) {
+        showFindPwToastLimited('아이디와 이메일을 모두 입력해주세요.', 'error', 'find-pw-send-required');
+        return;
+    }
+
     if (!isValidLoginId(loginId)) {
-        showToast('아이디는 영문/숫자 4~20자로 입력해주세요.', 'warning');
+        showFindPwToastLimited('아이디는 영문/숫자 4~20자로 입력해주세요.', 'warning', 'find-pw-send-loginId-invalid');
         return;
     }
 
     if (!isValidEmail(email)) {
-        showToast('이메일 형식이 올바르지 않습니다.', 'warning');
+        showFindPwToastLimited('이메일 형식이 올바르지 않습니다.', 'warning', 'find-pw-send-email-invalid');
         return;
     }
 
-    const response = await fetch('/api/members/find-pw/send-email', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            loginId: loginId,
-            email: email
-        })
-    });
+    findPwCodeSending = true;
 
-    const result = await safeJson(response);
-
-    if (!response.ok || (result && result.success === false)) {
-        showToast(getErrorMessage(result, '아이디와 이메일 정보를 다시 확인해주세요.'),'error');
-        return;
+    if (sendCodeBtn) {
+        sendCodeBtn.disabled = true;
+        sendCodeBtn.dataset.originalText = sendCodeBtn.innerText;
+        sendCodeBtn.innerText = '전송중';
     }
 
-    showToast('비밀번호 재설정 인증번호가 전송되었습니다.','success');
+    try {
+        var response = await fetch('/api/members/find-pw/send-email', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                loginId: loginId,
+                email: email
+            })
+        });
+
+        var result = await safeJson(response);
+
+        if (!response.ok || (result && result.success === false)) {
+            showFindPwToastLimited(getErrorMessage(result, '아이디와 이메일 정보를 다시 확인해주세요.'), 'error', 'find-pw-send-error');
+            return;
+        }
+
+        showFindPwToastLimited('비밀번호 재설정 인증번호가 전송되었습니다.', 'success', 'find-pw-send-success');
+
+    } catch (e) {
+        showFindPwToastLimited('인증번호 전송 중 오류가 발생했습니다.', 'error', 'find-pw-send-fetch-error');
+
+    } finally {
+        findPwCodeSending = false;
+
+        if (sendCodeBtn) {
+            sendCodeBtn.disabled = false;
+            sendCodeBtn.innerText = sendCodeBtn.dataset.originalText || '전송';
+            delete sendCodeBtn.dataset.originalText;
+        }
+    }
 }
 
 // 비밀번호 찾기 인증번호 확인
 async function verifyFindPwCode() {
-    const email = document.getElementById('email').value.trim();
-    const code = document.getElementById('emailCode').value.trim();
-
-    if (!email || !code) {
-        showToast('이메일과 인증번호를 모두 입력해주세요.','error');
+    if (findPwCodeVerifying) {
         return;
     }
+
+    var emailInput = document.getElementById('email');
+    var codeInput = document.getElementById('emailCode');
+    var verifyBtn = document.getElementById('verifyBtn');
+
+    if (!emailInput || !codeInput) {
+        showFindPwToastLimited('이메일 인증 입력 정보를 찾을 수 없습니다.', 'error', 'find-pw-verify-input-missing');
+        return;
+    }
+
+    var email = emailInput.value.trim();
+    var code = codeInput.value.trim();
+
+    if (!email || !code) {
+        showFindPwToastLimited('이메일과 인증번호를 모두 입력해주세요.', 'error', 'find-pw-verify-required');
+        return;
+    }
+
     if (!isValidEmail(email)) {
-        showToast('이메일 형식이 올바르지 않습니다.', 'warning');
+        showFindPwToastLimited('이메일 형식이 올바르지 않습니다.', 'warning', 'find-pw-verify-email-invalid');
         return;
     }
 
     if (!/^\d{6}$/.test(code)) {
-        showToast('인증번호는 6자리 숫자로 입력해주세요.', 'warning');
+        showFindPwToastLimited('인증번호는 6자리 숫자로 입력해주세요.', 'warning', 'find-pw-verify-code-invalid');
         return;
     }
 
-    const response = await fetch('/api/members/find-pw/verify', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            email: email,
-            code: code
-        })
-    });
+    findPwCodeVerifying = true;
+    var verified = false;
 
-    const result = await safeJson(response);
-
-    if (!response.ok || (result && result.success === false)) {
-        showToast(getErrorMessage(result, '인증번호를 확인해주세요.'),'error');
-        return;
+    if (verifyBtn) {
+        verifyBtn.disabled = true;
+        verifyBtn.dataset.originalText = verifyBtn.innerText;
+        verifyBtn.innerText = '확인중';
     }
 
-    document.getElementById('emailVerified').value = 'true';
+    try {
+        var response = await fetch('/api/members/find-pw/verify', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                email: email,
+                code: code
+            })
+        });
 
-    const verifyBtn = document.getElementById('verifyBtn');
-    verifyBtn.innerText = '완료';
-    verifyBtn.classList.add('success');
+        var result = await safeJson(response);
 
-    showToast('인증이 완료되었습니다.','success');
+        if (!response.ok || (result && result.success === false)) {
+            showFindPwToastLimited(getErrorMessage(result, '인증번호를 확인해주세요.'), 'error', 'find-pw-verify-error');
+            return;
+        }
+
+        verified = true;
+        document.getElementById('emailVerified').value = 'true';
+
+        if (verifyBtn) {
+            verifyBtn.innerText = '완료';
+            verifyBtn.classList.add('success');
+        }
+
+        showFindPwToastLimited('인증이 완료되었습니다.', 'success', 'find-pw-verify-success');
+
+    } catch (e) {
+        showFindPwToastLimited('인증번호 확인 중 오류가 발생했습니다.', 'error', 'find-pw-verify-fetch-error');
+
+    } finally {
+        findPwCodeVerifying = false;
+
+        if (verifyBtn) {
+            verifyBtn.disabled = false;
+
+            if (!verified) {
+                verifyBtn.innerText = verifyBtn.dataset.originalText || '확인';
+            }
+
+            delete verifyBtn.dataset.originalText;
+        }
+    }
 }
 
 // 비밀번호 재설정 화면 이동
 function goToResetPw(event) {
     event.preventDefault();
 
-    const loginId = document.getElementById('loginId').value.trim();
-    const email = document.getElementById('email').value.trim();
-    const emailVerified = document.getElementById('emailVerified').value;
+    if (findPwMoving) {
+        return;
+    }
+
+    var loginId = document.getElementById('loginId').value.trim();
+    var email = document.getElementById('email').value.trim();
+    var emailVerified = document.getElementById('emailVerified').value;
 
     if (!loginId || !email) {
-        showToast('아이디와 이메일을 입력해주세요.','error');
+        showFindPwToastLimited('아이디와 이메일을 입력해주세요.', 'error', 'find-pw-move-required');
         return;
     }
 
     if (emailVerified !== 'true') {
-        showToast('이메일 인증을 먼저 완료해주세요.','error');
+        showFindPwToastLimited('이메일 인증을 먼저 완료해주세요.', 'error', 'find-pw-move-email-not-verified');
         return;
     }
+
     if (!isValidLoginId(loginId)) {
-        showToast('아이디는 영문/숫자 4~20자로 입력해주세요.', 'warning');
+        showFindPwToastLimited('아이디는 영문/숫자 4~20자로 입력해주세요.', 'warning', 'find-pw-move-loginId-invalid');
         return;
     }
 
     if (!isValidEmail(email)) {
-        showToast('이메일 형식이 올바르지 않습니다.', 'warning');
+        showFindPwToastLimited('이메일 형식이 올바르지 않습니다.', 'warning', 'find-pw-move-email-invalid');
         return;
     }
 
-    window.location.href = `/api/view/reset-pw?email=${encodeURIComponent(email)}`;
-    
+    findPwMoving = true;
+    window.location.href = '/api/view/reset-pw?email=' + encodeURIComponent(email);
 }
