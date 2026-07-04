@@ -80,9 +80,9 @@
     text-align: center !important;
     border: none;
     border-radius: 999px;
-    background-color: var(--ivory2);
-    color: var(--forest);
-    font-size: 10px !important; /* 폰트 크기를 살짝 줄여서 짤림 완벽 방지 */
+    background-color: #6C9A8B;
+    color: white;
+    font-size: 9.5px !important; /* 폰트 크기를 살짝 줄여서 짤림 완벽 방지 */
     letter-spacing: -0.5px !important; /* 글자 사이 간격 좁히기 */
     font-weight: 800;
     text-decoration: none;
@@ -93,7 +93,7 @@
 
 .edit-profile-btn:hover,
 .badge-edit-btn:hover {
-    background-color: #e5d5b8;
+    background-color: #6C9A8B;
 }
 
 /* 메뉴 */
@@ -290,12 +290,16 @@
     height: 32px;
     border: none;
     border-radius: 50%;
-    background-color: var(--ivory2);
-    color: var(--forest);
+    background-color: #df5a4f;
+    color: white;
     font-size: 22px;
     font-weight: 700;
     line-height: 1;
     cursor: pointer;
+}
+.badge-modal-close:hover{
+    background-color: #e57b72;
+
 }
 
 .badge-modal-desc {
@@ -381,13 +385,20 @@
 }
 
 .badge-cancel-btn {
-    background-color: var(--ivory2);
-    color: var(--forest);
+    background-color: #df5a4f;
+    color: white;
+}
+.badge-cancel-btn:hover{
+    background-color: #e57b72;
 }
 
 .badge-save-btn {
     background-color: var(--green);
     color: white;
+}
+
+.badge-save-btn:hover{
+    background-color: var(--green2);
 }
 
 .empty-badge-message {
@@ -589,8 +600,8 @@
     height: 52px;
     border: none;
     border-radius: 14px;
-    background-color: var(--ivory2);
-    color: var(--forest);
+    background-color: var(--green);
+    color: white;
     font-size: 14px;
     font-weight: 900;
     cursor: pointer;
@@ -598,7 +609,7 @@
 }
 
 .profile-action-btn:hover {
-    background-color: #e5d5b8;
+    background-color: var(--green2);
 }
 
 .profile-bottom-fixed {
@@ -713,13 +724,20 @@
 }
 
 .withdraw-cancel-btn {
-    background-color: var(--ivory2);
-    color: var(--forest);
+    background-color: var(--green);
+    color: white;
+
+}
+.withdraw-cancel-btn:hover{
+    background-color: var(--green2);
 }
 
 .withdraw-submit-btn {
     background-color: var(--red);
     color: white;
+}
+.withdraw-submit-btn:hover{
+    background-color: #e57b72;
 }
 
 /* 알림 전체 보기 페이지 */
