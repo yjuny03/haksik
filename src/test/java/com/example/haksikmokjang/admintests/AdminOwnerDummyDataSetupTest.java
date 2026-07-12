@@ -36,8 +36,10 @@ public class AdminOwnerDummyDataSetupTest {
 
         for (int i = 1; i <= 30; i++) {
             String loginId = "ownerpage" + String.format("%02d", i);
+            String businessNumber = "123-45-" + String.format("%05d", i);
 
-            if (memberRepository.existsByLoginId(loginId)) {
+            if (memberRepository.existsByLoginId(loginId)
+                    || ownerProfileRepository.existsByBusinessNumber(businessNumber)) {
                 continue;
             }
 
@@ -54,7 +56,7 @@ public class AdminOwnerDummyDataSetupTest {
 
             OwnerProfile ownerProfile = OwnerProfile.builder()
                     .member(ownerMember)
-                    .businessNumber("123-45-" + String.format("%05d", i))
+                    .businessNumber(businessNumber)
                     .businessName("테스트식당" + i)
                     .ownerName("점주" + i)
                     .ownerPhone("010-8000-" + String.format("%04d", i))

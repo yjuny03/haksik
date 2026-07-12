@@ -26,6 +26,8 @@ public class ChatbotController {
 
         // 프론트에서 보낸 질문 쏙 빼기
         String userMessage = requestData.get("message");
+        Double lat = parseDouble(requestData.get("lat"));
+        Double lng = parseDouble(requestData.get("lng"));
 
         //  유저의 선호 음식을 찾아서 꺼내오기 로직
         String preferredFood = "";
@@ -39,12 +41,29 @@ public class ChatbotController {
         }
 
         //  챗봇 두뇌로 질문이랑 사용자 식성을 같이 던져주기
-        String aiAnswer = chatbotService.getAiResponse(userMessage, preferredFood);
+        String aiAnswer = chatbotService.getAiResponse(
+                userMessage,
+                preferredFood,
+                userDetails == null ? null : userDetails.getMember(),
+                lat,
+                lng
+        );
 
         // 프론트가 data.answer 로 읽을 수 있게 돌려주기
         Map<String, String> response = new HashMap<>();
         response.put("answer", aiAnswer);
 
         return response;
+    }
+
+    private Double parseDouble(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException exception) {
+            return null;
+        }
     }
 }

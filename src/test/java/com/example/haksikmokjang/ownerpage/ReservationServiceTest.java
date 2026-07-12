@@ -46,7 +46,10 @@ class ReservationServiceTest {
 
         // 점주 및 가게 세팅
         Member mockOwner = Member.builder().loginId(ownerLoginId).build();
-        Store mockStore = Store.builder().member(mockOwner).build();
+        Store mockStore = Store.builder()
+                .member(mockOwner)
+                .name("예약 테스트 식당")
+                .build();
 
         // 예약을 신청한 일반 유저 세팅
         Member mockUser = Member.builder().loginId("user999").build();
@@ -75,8 +78,8 @@ class ReservationServiceTest {
         verify(notificationService, times(1)).sendNotification(
                 eq(mockUser),
                 eq("RESERVATION"),
-                eq("예약 상태 업데이트"),
-                eq("예약이 확정되었습니다!"),
+                eq("예약 수락"),
+                eq("[예약 테스트 식당] 식당 예약이 수락되었습니다."),
                 eq("RESERVATION"),
                 eq(reservationId)
         );

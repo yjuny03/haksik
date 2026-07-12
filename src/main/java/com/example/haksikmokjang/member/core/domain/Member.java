@@ -88,6 +88,15 @@ public class Member extends BaseEntity {
         this.loginFailCount = 0;
     }
 
+    public void unlockIfLockedByReportPenalty() {
+        if (!isLocked() || !"신고 제재로 인한 계정 잠금".equals(this.lockedReason)) {
+            return;
+        }
+        this.lockedYn = "N";
+        this.lockedAt = null;
+        this.lockedReason = null;
+    }
+
     public boolean isLocked() {
         return "Y".equals(this.lockedYn);
     }

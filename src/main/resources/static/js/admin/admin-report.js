@@ -3,7 +3,20 @@ const reportPageSize = 10;
 
 // 신고 목록 초기 조회
 document.addEventListener("DOMContentLoaded", () => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("status");
+    const targetType = params.get("targetType");
+    if (status && document.querySelector(`#statusFilter option[value="${status}"]`)) {
+        document.getElementById("statusFilter").value = status;
+    }
+    if (targetType && document.querySelector(`#targetTypeFilter option[value="${targetType}"]`)) {
+        document.getElementById("targetTypeFilter").value = targetType;
+    }
     fetchReports(0);
+    const reportId = params.get("reportId");
+    if (reportId && /^\d+$/.test(reportId)) {
+        openReportDetail(Number(reportId));
+    }
 });
 
 // 신고 목록 검색 페이지 조회
@@ -41,14 +54,14 @@ function renderReports(reports) {
     if (!reports || reports.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="10">조회된 신고가 없습니다.</td>
+                <td colspan="11">조회된 신고가 없습니다.</td>
             </tr>
         `;
         return;
     }
 
     reports.forEach(report => {
-        const processedBy = report.processedByLoginId || "-";
+        const processedBy = report.processorType === "AI" ? "Mock AI" : (report.processedByLoginId || "-");
         const processedAt = report.processedAt || "-";
 
         tbody.innerHTML += `
@@ -57,6 +70,7 @@ function renderReports(reports) {
                 <td>${report.reporterLoginId}</td>
                 <td>${renderTargetType(report.targetType)}</td>
                 <td>${report.targetId}</td>
+                <td>${report.sameTargetReportCount || 1}건</td>
                 <td>${report.reason}</td>
                 <td>${renderReportStatusBadge(report.status)}</td>
                 <td>${processedBy}</td>
@@ -100,6 +114,10 @@ function renderReportStatusBadge(status) {
 
     if (status === "REJECTED") {
         return `<span class="badge banned">반려</span>`;
+    }
+
+    if (status === "CANCELED") {
+        return `<span class="badge">처리취소</span>`;
     }
 
     return `<span class="badge">${status}</span>`;
@@ -214,7 +232,7 @@ function renderReportDetail(report) {
                 </div>
                 <div class="detail-item">
                     <span class="detail-label">처리자</span>
-                    <strong>${report.processedByLoginId || "-"}</strong>
+                    <strong>${report.processorType === "AI" ? "Mock AI" : (report.processedByLoginId || "-")}</strong>
                 </div>
                 <div class="detail-item">
                     <span class="detail-label">처리일시</span>
@@ -260,13 +278,60 @@ function renderReportDetail(report) {
             </div>
         </div>
 
+        ${renderAiAnalysis(report.aiAnalysis, report.attachments)}
+
         ${renderDetailCancelButton(report)}
     `;
 }
 
+function renderAiAnalysis(ai, attachments) {
+    if (!ai) {
+        return `
+            <div class="detail-section">
+                <h4 class="detail-section-title">AI 자동 분석</h4>
+                <div class="detail-reason-box">AI 분석 결과가 없습니다.</div>
+            </div>
+        `;
+    }
+
+    const policyCodes = Array.isArray(ai.policyCodes) && ai.policyCodes.length > 0
+        ? ai.policyCodes.map(escapeAdminHtml).join(", ")
+        : "-";
+    const attachmentNotice = Array.isArray(attachments) && attachments.length > 0
+        ? `<div class="detail-reason-box">첨부 이미지는 AI 분석 대상이 아닙니다. 텍스트만 분석했습니다.</div>`
+        : "";
+
+    return `
+        <div class="detail-section">
+            <h4 class="detail-section-title">AI 자동 분석</h4>
+            <div class="detail-grid">
+                <div class="detail-item"><span class="detail-label">유형</span><strong>${escapeAdminHtml(ai.category)}</strong></div>
+                <div class="detail-item"><span class="detail-label">판정</span><strong>${escapeAdminHtml(ai.decision)}</strong></div>
+                <div class="detail-item"><span class="detail-label">처리 상태</span><strong>${escapeAdminHtml(ai.processingStatus)}</strong></div>
+                <div class="detail-item"><span class="detail-label">서버 규칙 일치</span><strong>${ai.ruleMatched ? "Y" : "N"}</strong></div>
+                <div class="detail-item"><span class="detail-label">위험도</span><strong>${escapeAdminHtml(ai.riskScore)}</strong></div>
+                <div class="detail-item"><span class="detail-label">판단 확실성</span><strong>${escapeAdminHtml(ai.confidenceScore)}</strong></div>
+                <div class="detail-item"><span class="detail-label">정책 코드</span><strong>${policyCodes}</strong></div>
+                <div class="detail-item"><span class="detail-label">모델</span><strong>${escapeAdminHtml(ai.modelName)}</strong></div>
+            </div>
+            <div class="detail-reason-box">${escapeAdminHtml(ai.reasonSummary)}</div>
+            ${attachmentNotice}
+        </div>
+    `;
+}
+
+function escapeAdminHtml(value) {
+    return String(value ?? "-")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
 // 상세 모달 처리 취소 버튼 출력
 function renderDetailCancelButton(report) {
-    if (report.status === "PENDING") {
+    if (report.status === "PENDING" || report.status === "CANCELED") {
         return "";
     }
 
@@ -294,6 +359,10 @@ function renderReportDetailStatus(status) {
 
     if (status === "REJECTED") {
         return `<span class="detail-status good">반려</span>`;
+    }
+
+    if (status === "CANCELED") {
+        return `<span class="detail-status">처리취소</span>`;
     }
 
     return `<span class="detail-status">${status}</span>`;

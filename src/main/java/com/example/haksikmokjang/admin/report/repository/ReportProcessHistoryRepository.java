@@ -5,6 +5,9 @@ import com.example.haksikmokjang.report.domain.Report;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
+import java.util.List;
+import org.springframework.data.domain.Limit;
+import com.example.haksikmokjang.report.domain.ReportProcessorType;
 
 public interface ReportProcessHistoryRepository extends JpaRepository<ReportProcessHistory, Long> {
 
@@ -13,4 +16,11 @@ public interface ReportProcessHistoryRepository extends JpaRepository<ReportProc
             Report report,
             String canceledYn
     );
+
+    List<ReportProcessHistory> findByProcessorTypeOrderByProcessedAtDesc(
+            ReportProcessorType processorType,
+            Limit limit
+    );
+
+    List<ReportProcessHistory> findByCanceledYnOrderByCanceledAtDesc(String canceledYn, Limit limit);
 }

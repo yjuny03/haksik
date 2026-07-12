@@ -1,7 +1,9 @@
 package com.example.haksikmokjang.admin.report.dto;
 
+import com.example.haksikmokjang.ai.moderation.dto.AiModerationAnalysisResponse;
 import com.example.haksikmokjang.fileattachment.dto.FileAttachmentResponse;
 import com.example.haksikmokjang.report.domain.Report;
+import com.example.haksikmokjang.report.domain.ReportProcessorType;
 import com.example.haksikmokjang.report.domain.ReportStatus;
 import lombok.Builder;
 import lombok.Getter;
@@ -28,6 +30,8 @@ public class AdminReportDetailResponse {
     private String processedByLoginId;
     private LocalDateTime processedAt;
     private String processedReason;
+    private ReportProcessorType processorType;
+    private AiModerationAnalysisResponse aiAnalysis;
 
     private String targetTitle;
     private String targetContent;
@@ -64,6 +68,7 @@ public class AdminReportDetailResponse {
                 )
                 .processedAt(report.getProcessedAt())
                 .processedReason(report.getProcessedReason())
+                .processorType(report.getProcessorType())
                 .build();
     }
     // 첨부파일 목록만 붙여서 새 DTO로 다시 만듦
@@ -80,11 +85,36 @@ public class AdminReportDetailResponse {
                 .processedByLoginId(this.processedByLoginId)
                 .processedAt(this.processedAt)
                 .processedReason(this.processedReason)
+                .processorType(this.processorType)
+                .aiAnalysis(this.aiAnalysis)
                 .targetTitle(this.targetTitle)
                 .targetContent(this.targetContent)
                 .targetWriterLoginId(this.targetWriterLoginId)
                 .targetStatus(this.targetStatus)
                 .attachments(attachments == null ? List.of() : attachments)
+                .build();
+    }
+
+    public AdminReportDetailResponse withAiAnalysis(AiModerationAnalysisResponse aiAnalysis) {
+        return AdminReportDetailResponse.builder()
+                .reportId(this.reportId)
+                .reporterId(this.reporterId)
+                .reporterLoginId(this.reporterLoginId)
+                .reporterEmail(this.reporterEmail)
+                .targetType(this.targetType)
+                .targetId(this.targetId)
+                .reason(this.reason)
+                .status(this.status)
+                .processedByLoginId(this.processedByLoginId)
+                .processedAt(this.processedAt)
+                .processedReason(this.processedReason)
+                .processorType(this.processorType)
+                .aiAnalysis(aiAnalysis)
+                .targetTitle(this.targetTitle)
+                .targetContent(this.targetContent)
+                .targetWriterLoginId(this.targetWriterLoginId)
+                .targetStatus(this.targetStatus)
+                .attachments(this.attachments == null ? List.of() : this.attachments)
                 .build();
     }
 }

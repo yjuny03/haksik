@@ -1,6 +1,7 @@
 package com.example.haksikmokjang.ownerpage;
 
 import com.example.haksikmokjang.member.core.domain.Member;
+import com.example.haksikmokjang.member.core.domain.AccountStatus;
 import com.example.haksikmokjang.member.core.domain.MemberRole;
 import com.example.haksikmokjang.member.core.repository.MemberRepository;
 import com.example.haksikmokjang.ownerpage.store.domain.BusinessStatus;
@@ -10,16 +11,16 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.annotation.Rollback;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
 
 @SpringBootTest
 class StoreDummyTest {
 
     @Autowired StoreRepository storeRepository;
     @Autowired MemberRepository memberRepository;
+    @Autowired PasswordEncoder passwordEncoder;
 
     @Test
     @Transactional
@@ -27,12 +28,12 @@ class StoreDummyTest {
     @DisplayName("5명의 점주 계정(01~05)에 각각 가게 1개씩 강제 주입")
     void insertStoresForFiveOwners() {
 
-        // 1. 타겟팅: DB에 있는 ownerpage01 ~ 05 점주 5명을 정확히 긁어옵니다.
-        Member owner1 = memberRepository.findByLoginId("ownerpage01").orElseThrow(() -> new RuntimeException("owner1 없음"));
-        Member owner2 = memberRepository.findByLoginId("ownerpage02").orElseThrow(() -> new RuntimeException("owner2 없음"));
-        Member owner3 = memberRepository.findByLoginId("ownerpage03").orElseThrow(() -> new RuntimeException("owner3 없음"));
-        Member owner4 = memberRepository.findByLoginId("ownerpage04").orElseThrow(() -> new RuntimeException("owner4 없음"));
-        Member owner5 = memberRepository.findByLoginId("ownerpage05").orElseThrow(() -> new RuntimeException("owner5 없음"));
+        // 1. 타겟팅: 없으면 만들고 있으면 재사용합니다.
+        Member owner1 = getOrCreateOwner("ownerpage01", 1);
+        Member owner2 = getOrCreateOwner("ownerpage02", 2);
+        Member owner3 = getOrCreateOwner("ownerpage03", 3);
+        Member owner4 = getOrCreateOwner("ownerpage04", 4);
+        Member owner5 = getOrCreateOwner("ownerpage05", 5);
 
         // 2. 타점 1: 광운대역 초근접 (ownerpage01 소유)
         Store store1 = Store.builder()
@@ -99,9 +100,32 @@ class StoreDummyTest {
                 .businessStatus(BusinessStatus.OPEN)
                 .build();
 
-        // 7. DB에 5개 가게 일괄 삽입
-        storeRepository.saveAll(List.of(store1, store2, store3, store4, store5));
+        // 7. 재실행 시 같은 점주의 기존 가게를 재사용합니다.
+        saveIfOwnerHasNoStore(owner1, store1);
+        saveIfOwnerHasNoStore(owner2, store2);
+        saveIfOwnerHasNoStore(owner3, store3);
+        saveIfOwnerHasNoStore(owner4, store4);
+        saveIfOwnerHasNoStore(owner5, store5);
 
         System.out.println("🚨 5명의 점주에게 각 1개씩, 총 5개의 가게 주입 완료! 지도를 켜십시오.");
+    }
+
+    private Member getOrCreateOwner(String loginId, int index) {
+        return memberRepository.findByLoginId(loginId)
+                .orElseGet(() -> memberRepository.save(
+                        Member.builder()
+                                .loginId(loginId)
+                                .passwordHash(passwordEncoder.encode("1234"))
+                                .email(loginId + "@test.com")
+                                .phone("010-9100-" + String.format("%04d", index))
+                                .role(MemberRole.OWNER)
+                                .accountStatus(AccountStatus.ACTIVE)
+                                .build()
+                ));
+    }
+
+    private void saveIfOwnerHasNoStore(Member owner, Store store) {
+        storeRepository.findByMember_LoginId(owner.getLoginId())
+                .orElseGet(() -> storeRepository.save(store));
     }
 }

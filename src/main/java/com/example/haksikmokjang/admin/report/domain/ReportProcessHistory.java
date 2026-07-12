@@ -5,6 +5,7 @@ import com.example.haksikmokjang.member.core.domain.Member;
 import com.example.haksikmokjang.member.trust.domain.TrustPenaltyHistory;
 import com.example.haksikmokjang.report.domain.Report;
 import com.example.haksikmokjang.report.domain.ReportStatus;
+import com.example.haksikmokjang.report.domain.ReportProcessorType;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -76,8 +77,12 @@ public class ReportProcessHistory extends CreatedTimeEntity {
     private BigDecimal penaltyPoint;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "processed_by", nullable = false)
+    @JoinColumn(name = "processed_by")
     private Member processedBy;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "processor_type", length = 20)
+    private ReportProcessorType processorType;
 
     @Column(name = "processed_at", nullable = false)
     private LocalDateTime processedAt;
@@ -111,7 +116,8 @@ public class ReportProcessHistory extends CreatedTimeEntity {
             BigDecimal beforeMannerTemperature,
             BigDecimal afterMannerTemperature,
             BigDecimal penaltyPoint,
-            Member processedBy
+            Member processedBy,
+            ReportProcessorType processorType
     ) {
         this.report = report;
         this.targetType = targetType;
@@ -128,6 +134,7 @@ public class ReportProcessHistory extends CreatedTimeEntity {
         this.afterMannerTemperature = afterMannerTemperature;
         this.penaltyPoint = penaltyPoint;
         this.processedBy = processedBy;
+        this.processorType = processorType;
         this.processedAt = LocalDateTime.now();
         this.canceledYn = "N";
     }

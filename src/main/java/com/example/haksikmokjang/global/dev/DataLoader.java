@@ -1,10 +1,17 @@
 package com.example.haksikmokjang.global.dev;
 
+import com.example.haksikmokjang.ai.moderation.domain.AiModerationAnalysis;
+import com.example.haksikmokjang.ai.moderation.domain.ModerationCategory;
+import com.example.haksikmokjang.ai.moderation.domain.ModerationDecision;
+import com.example.haksikmokjang.ai.moderation.dto.ModerationResult;
+import com.example.haksikmokjang.ai.moderation.repository.AiModerationAnalysisRepository;
 import com.example.haksikmokjang.chat.chatform.domain.ChatForm;
 import com.example.haksikmokjang.chat.chatform.domain.ChatFormType;
 import com.example.haksikmokjang.chat.chatform.dto.ChatFormCreateRequest;
 import com.example.haksikmokjang.chat.chatform.repository.ChatFormRepository;
 import com.example.haksikmokjang.chat.chatform.service.ChatFormService;
+import com.example.haksikmokjang.chat.chatmessage.domain.ChatMessage;
+import com.example.haksikmokjang.chat.chatmessage.repository.ChatMessageRepository;
 import com.example.haksikmokjang.chat.chatmessage.dto.ChatMessageResponse;
 import com.example.haksikmokjang.chat.chatroom.domain.ChatRoom;
 import com.example.haksikmokjang.chat.chatroom.dto.ChatRoomResponse;
@@ -43,11 +50,14 @@ import com.example.haksikmokjang.member.signup.user.repository.UserProfileReposi
 import com.example.haksikmokjang.member.terms.domain.Terms;
 import com.example.haksikmokjang.member.terms.repository.TermsRepository;
 import com.example.haksikmokjang.ownerpage.store.domain.BusinessStatus;
+import com.example.haksikmokjang.ownerpage.store.domain.Menu;
+import com.example.haksikmokjang.ownerpage.store.domain.MenuStatus;
 import com.example.haksikmokjang.ownerpage.store.domain.Reservation;
 import com.example.haksikmokjang.ownerpage.store.domain.ReservationStatus;
 import com.example.haksikmokjang.ownerpage.store.domain.ReviewStatus;
 import com.example.haksikmokjang.ownerpage.store.domain.Store;
 import com.example.haksikmokjang.ownerpage.store.domain.StoreReview;
+import com.example.haksikmokjang.ownerpage.store.repository.MenuRepository;
 import com.example.haksikmokjang.ownerpage.store.repository.ReservationRepository;
 import com.example.haksikmokjang.ownerpage.store.repository.StoreRepository;
 import com.example.haksikmokjang.ownerpage.store.repository.StoreReviewRepository;
@@ -60,6 +70,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.env.Environment;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -82,7 +93,14 @@ public class DataLoader implements ApplicationRunner {
     private static final String SCHOOL_DOMAIN = "induk.ac.kr";
     private static final double BASE_LAT = 37.631668;
     private static final double BASE_LNG = 127.054045;
+    private static final int DEMO_USER_COUNT = 120;
+    private static final int DEMO_OWNER_COUNT = 60;
+    private static final int DEMO_STORE_COUNT = 58;
+    private static final int MAIN_CLUSTER_USER_COUNT = 80;
+    private static final String DEMO_CHAT_A_NAME = "[시연] AI 한식 우선 추천 채팅방";
+    private static final String DEMO_CHAT_B_NAME = "[시연] AI 동률 추천 채팅방";
 
+    private final Environment environment;
     private final EntityManager entityManager;
     private final PasswordEncoder passwordEncoder;
 
@@ -93,6 +111,7 @@ public class DataLoader implements ApplicationRunner {
     private final MemberLocationRepository memberLocationRepository;
     private final OwnerProfileRepository ownerProfileRepository;
     private final StoreRepository storeRepository;
+    private final MenuRepository menuRepository;
     private final MatchingWaitingRepository matchingWaitingRepository;
     private final BadgeRepository badgeRepository;
     private final MemberBadgeRepository memberBadgeRepository;
@@ -102,36 +121,49 @@ public class DataLoader implements ApplicationRunner {
     private final StoreReviewRepository storeReviewRepository;
     private final FileAttachmentRepository fileAttachmentRepository;
     private final ReportRepository reportRepository;
+    private final AiModerationAnalysisRepository aiModerationAnalysisRepository;
     private final ChatRoomCreateService chatRoomCreateService;
     private final ChatRoomRepository chatRoomRepository;
+    private final ChatMessageRepository chatMessageRepository;
     private final ChatFormService chatFormService;
     private final ChatFormRepository chatFormRepository;
 
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
+        if (!environment.getProperty("app.demo-mode", Boolean.class, false)) {
+            System.out.println("========== DataLoader skipped: app.demo-mode=true 가 아니므로 시연 데이터를 생성하지 않습니다. ==========");
+            return;
+        }
+
         upsertSchoolDomains();
         School indukSchool = getIndukSchool();
 
         upsertTerms();
         Member admin = getOrCreateAdmin();
         List<Member> users = createUsersAndMatchingData(indukSchool);
-        applyLockedDummyUsers();
         List<Member> owners = createOwners(admin);
         List<Store> stores = createStores(owners);
+        createMenusForStores(stores);
 
         createBadgesAndGiveTo(users.get(0));
         createCommunityData(users, indukSchool);
         createReservationAndReviewData(users, stores);
+        List<Long> demoChatRoomIds = createDemoChatRooms(users, stores);
         createReviewReadyChatRooms(users, stores);
-        createReportData(users.get(0));
+        createReportData(users, admin, indukSchool, stores, demoChatRoomIds);
 
         entityManager.flush();
         System.out.println("========== 학식목장 더미 데이터 주입 완료 ==========");
         System.out.println("ADMIN  : admin / qwer1234");
-        System.out.println("USER   : user1 ~ user100 / qwer1234");
-        System.out.println("OWNER  : owner1 ~ owner30 / qwer1234");
+        System.out.println("USER   : user1 ~ user" + DEMO_USER_COUNT + " / qwer1234");
+        System.out.println("OWNER  : owner1 ~ owner" + DEMO_OWNER_COUNT + " / qwer1234");
         System.out.println("SCHOOL : 인덕대학교(induk.ac.kr)");
+        System.out.println("CHAT A : " + DEMO_CHAT_A_NAME + " / id=" + demoChatRoomIds.get(0));
+        System.out.println("CHAT B : " + DEMO_CHAT_B_NAME + " / id=" + demoChatRoomIds.get(1));
+        System.out.println("AI URL : /api/chat/rooms/" + demoChatRoomIds.get(0) + "/ai/restaurant-recommendations?lat=37.631668&lng=127.054045&radiusKm=1&limit=3&context=CHAT_PLACE");
+        System.out.println("STORES : 인덕 제육하우스, 초안산 김치찌개, 데모 품절분식, 데모 휴무가게");
+        System.out.println("REPORT : [시연 신고] 제목/댓글/리뷰/채팅 메시지 대상 생성 완료");
     }
 
     private School getOrCreateIndukSchool() {
@@ -169,18 +201,12 @@ public class DataLoader implements ApplicationRunner {
     }
 
     private List<Member> createUsersAndMatchingData(School school) {
-        cancelExistingTestWaitings();
-
         List<Member> users = new ArrayList<>();
-        for (int i = 1; i <= 100; i++) {
+        for (int i = 1; i <= DEMO_USER_COUNT; i++) {
             Member member = getOrCreateUser(i);
             UserProfile userProfile = getOrCreateUserProfile(i, member, school);
             updateLocation(i, userProfile);
-
-            if (!isLockedDummyUser(i)) {
-                createWaiting(i, userProfile);
-            }
-
+            createWaiting(i, userProfile);
             users.add(member);
         }
         return users;
@@ -195,7 +221,7 @@ public class DataLoader implements ApplicationRunner {
                         .email(loginId + "@" + SCHOOL_DOMAIN)
                         .phone("010-1000-" + String.format("%04d", index))
                         .role(MemberRole.USER)
-                        .accountStatus(createUserAccountStatus(index))
+                        .accountStatus(AccountStatus.ACTIVE)
                         .build()));
     }
 
@@ -214,8 +240,8 @@ public class DataLoader implements ApplicationRunner {
                 .birthDate(createBirthDate(index))
                 .gender(createGender(index))
                 .preferredFoodCategory(createFoodCategory(index))
-                .mannerTemperature(createMannerTemperature(index))
-                .noShowCount(createNoShowCount(index))
+                .mannerTemperature(BigDecimal.valueOf(36.5 + (index % 5)))
+                .noShowCount(index % 4)
                 .build());
     }
 
@@ -229,50 +255,8 @@ public class DataLoader implements ApplicationRunner {
                 .findFirst();
     }
 
-    private boolean isLockedDummyUser(int index) {
-        return index >= 91 && index <= 100;
-    }
-
-    private AccountStatus createUserAccountStatus(int index) {
-        return AccountStatus.ACTIVE;
-    }
-
-    private BigDecimal createMannerTemperature(int index) {
-        if (isLockedDummyUser(index)) {
-            return BigDecimal.ZERO;
-        }
-        return BigDecimal.valueOf(36.5 + (index % 5));
-    }
-
-    private int createNoShowCount(int index) {
-        if (isLockedDummyUser(index)) {
-            return (index - 90) * 5;
-        }
-        return index % 4;
-    }
-
-    private void applyLockedDummyUsers() {
-        for (int index = 91; index <= 100; index++) {
-            String loginId = "user" + index;
-
-            memberRepository.findByLoginId(loginId)
-                    .ifPresent(member -> member.lockByTrust("매너온도 0도 및 노쇼 누적"));
-
-            entityManager.createQuery("""
-                    update UserProfile up
-                    set up.mannerTemperature = :mannerTemperature,
-                        up.noShowCount = :noShowCount
-                    where up.member.loginId = :loginId
-                    """)
-                    .setParameter("mannerTemperature", BigDecimal.ZERO)
-                    .setParameter("noShowCount", createNoShowCount(index))
-                    .setParameter("loginId", loginId)
-                    .executeUpdate();
-        }
-    }
-
     private void updateLocation(int index, UserProfile userProfile) {
-        double[] position = createPosition(index, 2.8);
+        double[] position = createClusterPosition(index, true);
         Optional<MemberLocation> optionalLocation = memberLocationRepository.findByUserProfile(userProfile);
 
         if (optionalLocation.isEmpty()) {
@@ -294,6 +278,10 @@ public class DataLoader implements ApplicationRunner {
     }
 
     private void createWaiting(int index, UserProfile userProfile) {
+        if (hasActiveWaiting(userProfile)) {
+            return;
+        }
+
         MatchingMode mode = createMatchingMode(index);
         MatchingType type = createMatchingType(index);
 
@@ -307,6 +295,19 @@ public class DataLoader implements ApplicationRunner {
                 .message(createMatchingMessage(index, mode, type, userProfile.getPreferredFoodCategory()))
                 .expiredAt(LocalDateTime.now().plusDays(7))
                 .build());
+    }
+
+    private boolean hasActiveWaiting(UserProfile userProfile) {
+        Long count = entityManager.createQuery("""
+                select count(mw)
+                from MatchingWaiting mw
+                where mw.userProfile = :userProfile
+                and mw.status = :status
+                """, Long.class)
+                .setParameter("userProfile", userProfile)
+                .setParameter("status", MatchingWaitingStatus.WAITING)
+                .getSingleResult();
+        return count > 0;
     }
 
     private void cancelExistingTestWaitings() {
@@ -326,16 +327,17 @@ public class DataLoader implements ApplicationRunner {
     }
 
     private List<String> testUserLoginIds() {
-        return IntStream.rangeClosed(1, 100)
+        return IntStream.rangeClosed(1, DEMO_USER_COUNT)
                 .mapToObj(i -> "user" + i)
                 .toList();
     }
 
     private MatchingMode createMatchingMode(int index) {
-        if (index <= 30) {
+        int slot = ((index - 1) % 40) + 1;
+        if (slot <= 16) {
             return MatchingMode.MEAL;
         }
-        if (index <= 60) {
+        if (slot <= 28) {
             return MatchingMode.BLIND_DATE;
         }
         return MatchingMode.GROUP;
@@ -386,9 +388,9 @@ public class DataLoader implements ApplicationRunner {
 
     private List<Member> createOwners(Member admin) {
         List<Member> owners = new ArrayList<>();
-        for (int i = 1; i <= 30; i++) {
+        for (int i = 1; i <= DEMO_OWNER_COUNT; i++) {
             Member owner = getOrCreateOwner(i);
-            createOwnerProfileIfNeeded(i, owner);
+            createOwnerProfileIfNeeded(i, owner, admin);
             owners.add(owner);
         }
         return owners;
@@ -407,28 +409,40 @@ public class DataLoader implements ApplicationRunner {
                         .build()));
     }
 
-    private void createOwnerProfileIfNeeded(int index, Member owner) {
-        if (ownerProfileRepository.existsByMember(owner)) {
+    private void createOwnerProfileIfNeeded(int index, Member owner, Member admin) {
+        Optional<OwnerProfile> existingProfile = ownerProfileRepository.findByMember(owner);
+        if (existingProfile.isPresent()) {
+            if (index == DEMO_OWNER_COUNT) {
+                existingProfile.get().cancelApproval();
+            } else if (existingProfile.get().getApprovalStatus() != ApprovalStatus.APPROVED) {
+                existingProfile.get().approve(admin);
+            }
             return;
         }
 
-        ownerProfileRepository.save(OwnerProfile.builder()
+        OwnerProfile profile = OwnerProfile.builder()
                 .member(owner)
                 .businessNumber("123-45-" + String.format("%05d", index))
                 .businessName(createStoreName(index))
                 .ownerName("점주" + index)
                 .ownerPhone("010-2000-" + String.format("%04d", index))
-                .approvalStatus(ApprovalStatus.APPROVED)
-                .build());
+                .approvalStatus(index == DEMO_OWNER_COUNT ? ApprovalStatus.PENDING : ApprovalStatus.APPROVED)
+                .build();
+
+        if (index != DEMO_OWNER_COUNT) {
+            profile.approve(admin);
+        }
+        ownerProfileRepository.save(profile);
     }
 
     private List<Store> createStores(List<Member> owners) {
         List<Store> stores = new ArrayList<>();
-        for (int i = 1; i <= owners.size(); i++) {
+        for (int i = 1; i <= Math.min(DEMO_STORE_COUNT, owners.size()); i++) {
             int index = i;
             Member owner = owners.get(index - 1);
             Store store = findStoreByOwner(owner)
                     .orElseGet(() -> storeRepository.save(createStore(index, owner)));
+            updateStoreForDemo(index, store);
             stores.add(store);
         }
         return stores;
@@ -442,7 +456,7 @@ public class DataLoader implements ApplicationRunner {
     }
 
     private Store createStore(int index, Member owner) {
-        double[] position = createPosition(index + 100, 2.5);
+        double[] position = createClusterPosition(index + 100, false);
         return Store.builder()
                 .member(owner)
                 .name(createStoreName(index))
@@ -452,11 +466,82 @@ public class DataLoader implements ApplicationRunner {
                 .longitude(position[1])
                 .phone("02-900-" + String.format("%04d", index))
                 .operatingHours(createOperatingHours(index))
-                .businessStatus(index % 7 == 0 ? BusinessStatus.BREAK_TIME : BusinessStatus.OPEN)
+                .businessStatus(index == 58 ? BusinessStatus.CLOSED : (index % 7 == 0 ? BusinessStatus.BREAK_TIME : BusinessStatus.OPEN))
                 .build();
     }
 
+    private void updateStoreForDemo(int index, Store store) {
+        double[] position = createClusterPosition(index + 100, false);
+        store.updateStoreInfo(
+                createStoreName(index),
+                createStoreAddress(index),
+                position[0],
+                position[1],
+                createStoreCategory(index),
+                "02-900-" + String.format("%04d", index),
+                createOperatingHours(index)
+        );
+        store.changeBusinessStatus(index == 58 ? BusinessStatus.CLOSED : (index % 7 == 0 ? BusinessStatus.BREAK_TIME : BusinessStatus.OPEN));
+    }
+
+    private void createMenusForStores(List<Store> stores) {
+        for (int i = 0; i < stores.size(); i++) {
+            int index = i + 1;
+            Store store = stores.get(i);
+            boolean soldOutOnly = index == 57;
+            String[] names = menuNamesForCategory(store.getCategory());
+
+            int menuCount = Math.min(names.length, 3 + (index % 3));
+            for (int j = 0; j < menuCount; j++) {
+                MenuStatus status = soldOutOnly || j == menuCount - 1 && index % 8 == 0
+                        ? MenuStatus.SOLD_OUT
+                        : MenuStatus.ON_SALE;
+                upsertMenu(store, names[j], 6500 + (j * 1000) + (index % 5) * 500, status);
+            }
+
+            if (!soldOutOnly) {
+                upsertMenu(store, names[names.length - 1] + " 품절", 9000 + (index % 4) * 500, MenuStatus.SOLD_OUT);
+            }
+        }
+    }
+
+    private void upsertMenu(Store store, String name, int price, MenuStatus status) {
+        Optional<Menu> existingMenu = menuRepository.findByStore_StoreId(store.getStoreId()).stream()
+                .filter(menu -> name.equals(menu.getName()))
+                .findFirst();
+
+        if (existingMenu.isPresent()) {
+            existingMenu.get().updateMenuInfo(name, price, status);
+            return;
+        }
+
+        menuRepository.save(Menu.builder()
+                .store(store)
+                .name(name)
+                .price(price)
+                .salesStatus(status)
+                .build());
+    }
+
+    private String[] menuNamesForCategory(String category) {
+        return switch (category == null ? "" : category) {
+            case "한식" -> new String[]{"제육덮밥", "김치찌개", "국밥", "비빔밥", "순두부찌개"};
+            case "중식" -> new String[]{"짜장면", "짬뽕", "탕수육", "마라탕", "볶음밥"};
+            case "일식" -> new String[]{"라멘", "돈카츠", "우동", "돈부리", "초밥"};
+            case "양식" -> new String[]{"파스타", "버거", "샐러드", "오므라이스", "스테이크"};
+            case "분식" -> new String[]{"떡볶이", "김밥", "라면", "순대", "튀김"};
+            default -> new String[]{"대표 메뉴", "오늘의 메뉴", "세트 메뉴", "가성비 메뉴", "시그니처 메뉴"};
+        };
+    }
+
     private String createStoreName(int index) {
+        if (index == 57) {
+            return "데모 품절분식";
+        }
+        if (index == 58) {
+            return "데모 휴무가게";
+        }
+
         String[] names = {
                 "인덕 제육하우스", "월계 돈까스", "초안산 김치찌개", "광운대역 국밥", "석계 마라탕",
                 "공릉 파스타", "인덕 분식", "월계 초밥", "노원 덮밥", "하계 짬뽕",
@@ -465,12 +550,32 @@ public class DataLoader implements ApplicationRunner {
                 "인덕 부대찌개", "광운 타코", "석계 칼국수", "공릉 오므라이스", "노원 찜닭",
                 "인덕 햄버거", "월계 샤브샤브", "하계 돈부리", "석계 만두", "공릉 기사식당"
         };
-        return names[index - 1];
+        if (index <= names.length) {
+            return names[index - 1];
+        }
+        String[] clusterNames = {"광운 캠퍼스밥상", "서울과기대 한그릇", "외대경희 라멘", "건대입구 덮밥", "캠퍼스 분식"};
+        return clusterNames[(index - names.length - 1) % clusterNames.length] + " " + index;
     }
 
     private String createStoreCategory(int index) {
         String[] categories = {"한식", "일식", "한식", "한식", "중식", "양식", "분식", "일식", "한식", "중식"};
         return categories[(index - 1) % categories.length];
+    }
+
+    private String createStoreAddress(int index) {
+        if (index <= 38) {
+            return "서울특별시 노원구 인덕대길 " + index;
+        }
+        if (index <= 43) {
+            return "서울특별시 노원구 광운로 데모 " + index;
+        }
+        if (index <= 48) {
+            return "서울특별시 노원구 공릉로 데모 " + index;
+        }
+        if (index <= 53) {
+            return "서울특별시 동대문구 이문로 데모 " + index;
+        }
+        return "서울특별시 광진구 능동로 데모 " + index;
     }
 
     private String createOperatingHours(int index) {
@@ -493,74 +598,81 @@ public class DataLoader implements ApplicationRunner {
         return new double[]{BASE_LAT + latOffset, BASE_LNG + lngOffset};
     }
 
-    private void createBadgesAndGiveTo(Member member) {
-        entityManager.createQuery("delete from MemberBadge mb").executeUpdate();
-        entityManager.createQuery("delete from Badge b").executeUpdate();
+    private double[] createClusterPosition(int index, boolean user) {
+        double[] center = clusterCenter(index, user);
+        int local = user
+                ? ((index - 1) % (index <= MAIN_CLUSTER_USER_COUNT ? MAIN_CLUSTER_USER_COUNT : 12)) + 1
+                : ((index - 101) % (index <= 138 ? 38 : 5)) + 1;
+        double maxRadiusKm = user ? 2.9 : 2.7;
+        if (!isMainCluster(index, user)) {
+            maxRadiusKm = user ? 0.9 : 0.65;
+        }
+        double minRadiusKm = isMainCluster(index, user) ? 0.2 : 0.15;
+        double angle = Math.toRadians((index * 91.7) + (user ? 13 : 41));
+        double radiusKm = minRadiusKm + ((local % 12) * (maxRadiusKm / 14.0));
+        double latOffset = (radiusKm / 111.0) * Math.sin(angle);
+        double lngOffset = (radiusKm / (111.0 * Math.cos(Math.toRadians(center[0])))) * Math.cos(angle);
+        return new double[]{center[0] + latOffset, center[1] + lngOffset};
+    }
 
-        Object[][] badgeData = {
-                {"새싹 메이트", "회원가입을 완료한 사용자", BadgeConditionType.SIGNUP, 1, "🌱"},
+    private boolean isMainCluster(int index, boolean user) {
+        return user ? index <= MAIN_CLUSTER_USER_COUNT : index <= 138;
+    }
 
-                {"첫 학식", "학식 메이트 매칭을 1회 이상 완료한 사용자", BadgeConditionType.MATCHING_COUNT, 1, "🍚"},
-                {"혼밥 탈출", "학식 메이트 매칭을 3회 이상 완료한 사용자", BadgeConditionType.MATCHING_COUNT, 3, "🙌"},
-                {"학식 단골", "학식 메이트 매칭을 5회 이상 완료한 사용자", BadgeConditionType.MATCHING_COUNT, 5, "🥢"},
-                {"혼밥 마스터", "학식 메이트 매칭을 10회 이상 완료한 사용자", BadgeConditionType.MATCHING_COUNT, 10, "👑"},
-                {"믿음직한 메이트", "학식 메이트 매칭을 20회 이상 완료한 사용자", BadgeConditionType.MATCHING_COUNT, 20, "💚"},
+    private double[] clusterCenter(int index, boolean user) {
+        if (isMainCluster(index, user)) {
+            return new double[]{BASE_LAT, BASE_LNG};
+        }
 
-                {"밥약 입문자", "식사 약속을 1회 이상 완료한 사용자", BadgeConditionType.MEAL_APPOINTMENT_COUNT, 1, "🥄"},
-                {"밥약 고수", "식사 약속을 5회 이상 완료한 사용자", BadgeConditionType.MEAL_APPOINTMENT_COUNT, 5, "🍱"},
-                {"밥약 마스터", "식사 약속을 10회 이상 완료한 사용자", BadgeConditionType.MEAL_APPOINTMENT_COUNT, 10, "🍽"},
-                {"밥약 장인", "식사 약속을 15회 이상 완료한 사용자", BadgeConditionType.MEAL_APPOINTMENT_COUNT, 15, "🏆"},
-
-                {"인덕 인싸", "서로 다른 사용자와 식사 약속을 3명 이상 완료한 사용자", BadgeConditionType.DIFFERENT_MEMBER_COUNT, 3, "😎"},
-                {"약속 부자", "서로 다른 사용자와 식사 약속을 10명 이상 완료한 사용자", BadgeConditionType.DIFFERENT_MEMBER_COUNT, 10, "🤝"},
-
-                {"매너 좋은 친구", "매너온도 37도 이상을 달성한 사용자", BadgeConditionType.MANNER_TEMPERATURE, 37, "😊"},
-                {"매너왕", "매너온도 40도 이상을 달성한 사용자", BadgeConditionType.MANNER_TEMPERATURE, 40, "🔥"},
-
-                {"따뜻한 한 끼", "좋은 평가를 5회 이상 받은 사용자", BadgeConditionType.GOOD_REVIEW_COUNT, 5, "🍲"},
-                {"칭찬 부자", "칭찬 내용을 10회 이상 받은 사용자", BadgeConditionType.PRAISE_COUNT, 10, "👍"},
-
-                {"노쇼 제로", "노쇼 없이 식사 약속을 5회 이상 완료한 사용자", BadgeConditionType.NO_SHOW_FREE_COUNT, 5, "✅"},
-                {"시간 약속왕", "약속 시간에 늦지 않고 10회 이상 참여한 사용자", BadgeConditionType.ON_TIME_COUNT, 10, "⏰"},
-
-                {"캠퍼스 메이트", "같은 학교 사용자와 매칭을 10회 이상 완료한 사용자", BadgeConditionType.SAME_SCHOOL_MATCHING_COUNT, 10, "🏫"},
-                {"전국구 메이트", "다른 학교 사용자와 매칭을 3회 이상 완료한 사용자", BadgeConditionType.DIFFERENT_SCHOOL_MATCHING_COUNT, 3, "🌍"}
+        int offset = user ? index - MAIN_CLUSTER_USER_COUNT - 1 : index - 139;
+        int cluster = Math.max(0, offset / (user ? 9 : 5));
+        return switch (cluster) {
+            case 0 -> new double[]{37.619894, 127.058356}; // 광운대
+            case 1 -> new double[]{37.631697, 127.077583}; // 서울과기대
+            case 2 -> new double[]{37.596700, 127.055200}; // 외대/경희대
+            default -> new double[]{37.540776, 127.079269}; // 건국대
         };
+    }
 
-        List<Badge> badges = new ArrayList<>();
-        for (Object[] data : badgeData) {
-            badges.add(new Badge(
-                    (String) data[0],
-                    (String) data[1],
-                    (BadgeConditionType) data[2],
-                    (Integer) data[3],
-                    (String) data[4]
-            ));
-        }
+    private void createBadgesAndGiveTo(Member member) {
+        if (badgeRepository.count() == 0) {
+            Object[][] badgeData = {
+                    {"새싹 메이트", "회원가입을 완료한 사용자", BadgeConditionType.SIGNUP, 1, "🌱"},
+                    {"첫 학식", "첫 학식 메이트 매칭을 완료한 사용자", BadgeConditionType.MATCHING_COUNT, 1, "🍚"},
+                    {"혼밥 탈출", "학식 메이트 매칭을 3회 이상 완료한 사용자", BadgeConditionType.MATCHING_COUNT, 3, "🙌"},
+                    {"혼밥 마스터", "학식 메이트 매칭을 10회 이상 완료한 사용자", BadgeConditionType.MATCHING_COUNT, 10, "👑"},
+                    {"밥약 입문자", "식사 약속을 1회 이상 완료한 사용자", BadgeConditionType.MEAL_APPOINTMENT_COUNT, 1, "🥄"},
+                    {"밥약 고수", "식사 약속을 5회 이상 완료한 사용자", BadgeConditionType.MEAL_APPOINTMENT_COUNT, 5, "🍱"},
+                    {"밥약 장인", "식사 약속을 15회 이상 완료한 사용자", BadgeConditionType.MEAL_APPOINTMENT_COUNT, 15, "🏆"},
+                    {"인덕 인싸", "서로 다른 사용자와 식사 약속을 10회 이상 완료한 사용자", BadgeConditionType.DIFFERENT_MEMBER_COUNT, 10, "😎"},
+                    {"매너 좋은 친구", "매너온도 37도 이상을 달성한 사용자", BadgeConditionType.MANNER_TEMPERATURE, 37, "😊"},
+                    {"매너왕", "매너온도 40도 이상을 달성한 사용자", BadgeConditionType.MANNER_TEMPERATURE, 40, "🔥"},
+                    {"따뜻한 한 끼", "상대방에게 좋은 평가를 5회 이상 받은 사용자", BadgeConditionType.GOOD_REVIEW_COUNT, 5, "🍲"},
+                    {"칭찬 부자", "칭찬을 10회 이상 받은 사용자", BadgeConditionType.PRAISE_COUNT, 10, "👍"},
+                    {"노쇼 제로", "노쇼 없이 식사 약속을 5회 이상 완료한 사용자", BadgeConditionType.NO_SHOW_FREE_COUNT, 5, "✅"},
+                    {"약속 지킴이", "노쇼 없이 식사 약속을 10회 이상 완료한 사용자", BadgeConditionType.NO_SHOW_FREE_COUNT, 10, "🤝"},
+                    {"시간 약속왕", "약속 시간에 늦지 않고 10회 이상 참여한 사용자", BadgeConditionType.ON_TIME_COUNT, 10, "⏰"},
+                    {"학식 탐험가", "서로 다른 메뉴로 매칭을 5회 이상 완료한 사용자", BadgeConditionType.DIFFERENT_MENU_COUNT, 5, "🧭"},
+                    {"메뉴 개척자", "새로운 메뉴 카테고리로 매칭을 10회 이상 완료한 사용자", BadgeConditionType.DIFFERENT_MENU_COUNT, 10, "🍜"},
+                    {"캠퍼스 메이트", "같은 학교 사용자와 매칭을 10회 이상 완료한 사용자", BadgeConditionType.SAME_SCHOOL_MATCHING_COUNT, 10, "🏫"},
+                    {"전국구 메이트", "다른 학교 사용자와 매칭을 3회 이상 완료한 사용자", BadgeConditionType.DIFFERENT_SCHOOL_MATCHING_COUNT, 3, "🌍"},
+                    {"믿음직한 메이트", "학식 메이트 매칭을 20회 이상 완료한 사용자", BadgeConditionType.MATCHING_COUNT, 20, "🛡️"}
+            };
 
-        badgeRepository.saveAll(badges);
-        entityManager.flush();
-
-        Badge signupBadge = badges.stream()
-                .filter(badge -> badge.getConditionType() == BadgeConditionType.SIGNUP)
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("회원가입 뱃지가 없습니다."));
-
-        List<Member> users = entityManager.createQuery("""
-            select m
-            from Member m
-            where m.loginId in :loginIds
-            """, Member.class)
-                .setParameter("loginIds", testUserLoginIds())
-                .getResultList();
-
-        for (Member user : users) {
-            if (!memberBadgeRepository.existsByMemberAndBadge(user, signupBadge)) {
-                memberBadgeRepository.save(new MemberBadge(user, signupBadge));
+            List<Badge> badges = new ArrayList<>();
+            for (Object[] data : badgeData) {
+                badges.add(new Badge(
+                        (String) data[0],
+                        (String) data[1],
+                        (BadgeConditionType) data[2],
+                        (Integer) data[3],
+                        (String) data[4]
+                ));
             }
+            badgeRepository.saveAll(badges);
         }
 
-        for (Badge badge : badges) {
+        for (Badge badge : badgeRepository.findAll()) {
             if (!memberBadgeRepository.existsByMemberAndBadge(member, badge)) {
                 memberBadgeRepository.save(new MemberBadge(member, badge));
             }
@@ -635,6 +747,8 @@ public class DataLoader implements ApplicationRunner {
     }
 
     private void createReservationAndReviewData(List<Member> users, List<Store> stores) {
+        createRecommendationReviewScenario(users, stores);
+
         if (existsReviewContentPrefix("[더미 리뷰]")) {
             return;
         }
@@ -689,6 +803,55 @@ public class DataLoader implements ApplicationRunner {
                     .requestMemo("[더미 승인대기 예약] 점주 예약 관리 화면 확인용 " + i)
                     .status(ReservationStatus.REQUESTED)
                     .build());
+        }
+    }
+
+    private void createRecommendationReviewScenario(List<Member> users, List<Store> stores) {
+        if (existsReviewContentPrefix("[시연 리뷰]")) {
+            return;
+        }
+
+        createStoreReviews(users, stores.get(0), 18, 5, "[시연 리뷰] 한식 A 리뷰 많고 평점 높음 ", ReviewStatus.ACTIVE);
+        createStoreReviews(users, stores.get(2), 2, 5, "[시연 리뷰] 한식 B 더 가깝지만 리뷰 적음 ", ReviewStatus.ACTIVE);
+        createStoreReviews(users, stores.get(4), 7, 3, "[시연 리뷰] 중식 중간 평점 ", ReviewStatus.ACTIVE);
+        createStoreReviews(users, stores.get(7), 10, 5, "[시연 리뷰] 일식 거리 있지만 리뷰 좋음 ", ReviewStatus.ACTIVE);
+        createStoreReviews(users, stores.get(5), 5, 3, "[시연 리뷰] 양식 평점 보통 ", ReviewStatus.ACTIVE);
+        createStoreReviews(users, stores.get(0), 3, 1, "[시연 리뷰] 삭제되어 점수 제외 ", ReviewStatus.DELETED);
+    }
+
+    private void createStoreReviews(
+            List<Member> users,
+            Store store,
+            int count,
+            int rating,
+            String contentPrefix,
+            ReviewStatus status
+    ) {
+        for (int i = 1; i <= count; i++) {
+            Member user = users.get((i + store.getStoreId().intValue()) % users.size());
+            Reservation reservation = reservationRepository.save(Reservation.builder()
+                    .store(store)
+                    .member(user)
+                    .reservationAt(LocalDateTime.now().minusDays(i + 1))
+                    .peopleCount(2 + (i % 3))
+                    .requestMemo(contentPrefix + i)
+                    .status(ReservationStatus.COMPLETED)
+                    .build());
+
+            StoreReview review = StoreReview.builder()
+                    .store(store)
+                    .member(user)
+                    .reservation(reservation)
+                    .rating(rating)
+                    .content(contentPrefix + i + " 맛있고 친절하고 재방문하고 싶습니다.")
+                    .status(status)
+                    .build();
+
+            if (status == ReviewStatus.ACTIVE && i % 4 == 0) {
+                review.writeOwnerReply("[시연 답글] 방문해주셔서 감사합니다.");
+            }
+
+            storeReviewRepository.save(review);
         }
     }
 
@@ -779,7 +942,145 @@ public class DataLoader implements ApplicationRunner {
         chatRoom.close();
     }
 
-    private void createReportData(Member reporter) {
+    private List<Long> createDemoChatRooms(List<Member> users, List<Store> stores) {
+        setPreferredFood(users.get(0), "한식");
+        setPreferredFood(users.get(1), "한식");
+        setPreferredFood(users.get(2), "중식");
+        setPreferredFood(users.get(3), "중식");
+        setPreferredFood(users.get(4), "일식");
+
+        ChatRoom chatA = findChatRoomByName(DEMO_CHAT_A_NAME)
+                .orElseGet(() -> {
+                    ChatRoomResponse response = chatRoomCreateService.createMealChatRoom(
+                            DEMO_CHAT_A_NAME,
+                            List.of(users.get(0).getMemberId(), users.get(1).getMemberId(), users.get(2).getMemberId())
+                    );
+                    return chatRoomRepository.findById(response.getChatRoomId())
+                            .orElseThrow(() -> new IllegalStateException("시연 채팅방 A 생성 실패"));
+                });
+
+        ChatRoom chatB = findChatRoomByName(DEMO_CHAT_B_NAME)
+                .orElseGet(() -> {
+                    ChatRoomResponse response = chatRoomCreateService.createGroupMealChatRoom(
+                            DEMO_CHAT_B_NAME,
+                            List.of(users.get(3).getMemberId(), users.get(4).getMemberId())
+                    );
+                    return chatRoomRepository.findById(response.getChatRoomId())
+                            .orElseThrow(() -> new IllegalStateException("시연 채팅방 B 생성 실패"));
+                });
+
+        createOpenPlaceFormIfNeeded(chatA.getChatRoomId(), users.get(0), "[시연 약속] 한식 우선 AI 추천 테스트");
+        createOpenPlaceFormIfNeeded(chatB.getChatRoomId(), users.get(3), "[시연 약속] 중식/일식 동률 AI 추천 테스트");
+
+        return List.of(chatA.getChatRoomId(), chatB.getChatRoomId());
+    }
+
+    private void setPreferredFood(Member member, String category) {
+        userProfileRepository.findByMember(member)
+                .ifPresent(profile -> profile.updatePreferredFood(category));
+    }
+
+    private Optional<ChatRoom> findChatRoomByName(String roomName) {
+        return entityManager.createQuery(
+                        "select cr from ChatRoom cr where cr.roomName = :roomName",
+                        ChatRoom.class
+                )
+                .setParameter("roomName", roomName)
+                .getResultStream()
+                .findFirst();
+    }
+
+    private void createOpenPlaceFormIfNeeded(Long chatRoomId, Member creator, String title) {
+        if (existsChatFormTitlePrefix(title)) {
+            return;
+        }
+
+        chatFormService.createForm(
+                chatRoomId,
+                ChatFormCreateRequest.builder()
+                        .formType(ChatFormType.PLACE)
+                        .title(title)
+                        .build(),
+                creator
+        );
+    }
+
+    private void createReportData(
+            List<Member> users,
+            Member admin,
+            School school,
+            List<Store> stores,
+            List<Long> demoChatRoomIds
+    ) {
+        Member reporter = users.get(0);
+        userProfileRepository.findByMember(users.get(5))
+                .ifPresent(profile -> profile.decreaseMannerTemperature(BigDecimal.valueOf(100)));
+
+        Post spamPost = getOrCreateScenarioPost(
+                users.get(10),
+                school,
+                "[시연 신고] 스팸 게시글",
+                "무료 쿠폰 홍보 링크 반복 게시입니다. 지금 가입하면 혜택을 준다는 스팸성 내용입니다.",
+                PostCategory.FREE
+        );
+        Post photoOnlyPost = getOrCreateScenarioPost(
+                users.get(11),
+                school,
+                "[시연 신고] 사진-only 게시글",
+                "",
+                PostCategory.FOOD
+        );
+        upsertFileAttachment(users.get(11), "POST", photoOnlyPost.getPostId(), "demo-photo-only-post.jpg");
+
+        Comment privacyComment = getOrCreateScenarioComment(
+                spamPost,
+                users.get(12),
+                "[시연 신고] 개인정보 댓글 010-1234-5678 연락주세요."
+        );
+
+        ChatRoom reportRoom = chatRoomRepository.findById(demoChatRoomIds.get(0))
+                .orElseThrow(() -> new IllegalStateException("시연 신고 채팅방 없음"));
+        ChatMessage abuseMessage = getOrCreateScenarioChatMessage(
+                reportRoom,
+                users.get(1),
+                "[시연 신고] 일반 욕설 채팅 메시지입니다."
+        );
+
+        StoreReview abuseReview = getOrCreateScenarioReview(
+                users.get(13),
+                stores.get(0),
+                "[시연 신고] 욕설/허위 리뷰입니다. 사실과 다른 악성 표현을 포함합니다.",
+                ReviewStatus.ACTIVE
+        );
+        StoreReview photoOnlyReview = getOrCreateScenarioReview(
+                users.get(14),
+                stores.get(1),
+                "[시연 신고] 사진-only 리뷰",
+                ReviewStatus.ACTIVE
+        );
+        upsertFileAttachment(users.get(14), "REVIEW", photoOnlyReview.getReviewId(), "demo-photo-only-review.jpg");
+
+        Report autoReport = getOrCreateReport(reporter, "POST", spamPost.getPostId(), "스팸 홍보 게시글");
+        autoReport.resolveByAi("AI 자동 처리 시연 데이터");
+        upsertAiAnalysis(autoReport, ModerationCategory.SPAM_AD, ModerationDecision.AUTO_HIDE,
+                BigDecimal.valueOf(0.93), BigDecimal.valueOf(0.91), List.of("SPAM-AD"), false, List.of(), true);
+
+        Report reviewRequiredReport = getOrCreateReport(users.get(2), "COMMENT", privacyComment.getCommentId(), "개인정보 노출 댓글");
+        upsertAiAnalysis(reviewRequiredReport, ModerationCategory.PERSONAL_INFO, ModerationDecision.REVIEW_REQUIRED,
+                BigDecimal.valueOf(0.72), BigDecimal.valueOf(0.76), List.of("PERSONAL-INFO"), true, List.of("PHONE"), false);
+
+        Report canceledReport = getOrCreateReport(users.get(3), "REVIEW", abuseReview.getReviewId(), "허위 리뷰 신고 처리 취소 시연");
+        canceledReport.cancelFinalProcess();
+        AiModerationAnalysis restoredAnalysis = upsertAiAnalysis(canceledReport, ModerationCategory.ABUSE, ModerationDecision.AUTO_HIDE,
+                BigDecimal.valueOf(0.88), BigDecimal.valueOf(0.84), List.of("ABUSE"), false, List.of(), false);
+        restoredAnalysis.markRestored("관리자 처리 취소/복구 시연 데이터");
+
+        getOrCreateReport(users.get(4), "CHAT_MESSAGE", abuseMessage.getChatMessageId(), "채팅 욕설 직접 신고 대기");
+        getOrCreateReport(users.get(5), "REVIEW", photoOnlyReview.getReviewId(), "사진만 있는 리뷰 직접 신고 대기");
+
+        getOrCreateReport(users.get(6), "POST", spamPost.getPostId(), "동일 대상 신고 1");
+        getOrCreateReport(users.get(7), "POST", spamPost.getPostId(), "동일 대상 신고 2");
+
         for (int i = 1; i <= 35; i++) {
             String targetType = createTargetType(i);
             Long targetId = (long) i;
@@ -795,6 +1096,168 @@ public class DataLoader implements ApplicationRunner {
                     .reason(createReportReason(i))
                     .build());
         }
+    }
+
+    private Post getOrCreateScenarioPost(Member writer, School school, String title, String content, PostCategory category) {
+        return entityManager.createQuery(
+                        "select p from Post p where p.title = :title",
+                        Post.class
+                )
+                .setParameter("title", title)
+                .getResultStream()
+                .findFirst()
+                .orElseGet(() -> postRepository.save(Post.builder()
+                        .member(writer)
+                        .school(school)
+                        .boardType(BoardType.SCHOOL)
+                        .category(category)
+                        .title(title)
+                        .content(content == null || content.isBlank() ? "[사진 첨부 게시글]" : content)
+                        .anonymousYn("N")
+                        .build()));
+    }
+
+    private Comment getOrCreateScenarioComment(Post post, Member writer, String content) {
+        return entityManager.createQuery(
+                        "select c from Comment c where c.post = :post and c.content = :content",
+                        Comment.class
+                )
+                .setParameter("post", post)
+                .setParameter("content", content)
+                .getResultStream()
+                .findFirst()
+                .orElseGet(() -> commentRepository.save(Comment.builder()
+                        .post(post)
+                        .member(writer)
+                        .content(content)
+                        .anonymousYn("N")
+                        .build()));
+    }
+
+    private ChatMessage getOrCreateScenarioChatMessage(ChatRoom chatRoom, Member sender, String message) {
+        return entityManager.createQuery(
+                        "select cm from ChatMessage cm where cm.chatRoom = :chatRoom and cm.message = :message",
+                        ChatMessage.class
+                )
+                .setParameter("chatRoom", chatRoom)
+                .setParameter("message", message)
+                .getResultStream()
+                .findFirst()
+                .orElseGet(() -> {
+                    ChatMessage chatMessage = chatMessageRepository.save(new ChatMessage(chatRoom, sender, message));
+                    chatRoom.updateLastMessage(message);
+                    return chatMessage;
+                });
+    }
+
+    private StoreReview getOrCreateScenarioReview(Member writer, Store store, String content, ReviewStatus status) {
+        return entityManager.createQuery(
+                        "select sr from StoreReview sr where sr.content = :content",
+                        StoreReview.class
+                )
+                .setParameter("content", content)
+                .getResultStream()
+                .findFirst()
+                .orElseGet(() -> {
+                    Reservation reservation = reservationRepository.save(Reservation.builder()
+                            .store(store)
+                            .member(writer)
+                            .reservationAt(LocalDateTime.now().minusDays(2))
+                            .peopleCount(2)
+                            .requestMemo(content)
+                            .status(ReservationStatus.COMPLETED)
+                            .build());
+                    return storeReviewRepository.save(StoreReview.builder()
+                            .store(store)
+                            .member(writer)
+                            .reservation(reservation)
+                            .rating(1)
+                            .content(content)
+                            .status(status)
+                            .build());
+                });
+    }
+
+    private Report getOrCreateReport(Member reporter, String targetType, Long targetId, String reason) {
+        return entityManager.createQuery(
+                        "select r from Report r where r.reporter = :reporter and r.targetType = :targetType and r.targetId = :targetId",
+                        Report.class
+                )
+                .setParameter("reporter", reporter)
+                .setParameter("targetType", targetType)
+                .setParameter("targetId", targetId)
+                .getResultStream()
+                .findFirst()
+                .orElseGet(() -> reportRepository.save(Report.builder()
+                        .reporter(reporter)
+                        .targetType(targetType)
+                        .targetId(targetId)
+                        .reason(reason)
+                        .build()));
+    }
+
+    private AiModerationAnalysis upsertAiAnalysis(
+            Report report,
+            ModerationCategory category,
+            ModerationDecision decision,
+            BigDecimal riskScore,
+            BigDecimal confidenceScore,
+            List<String> policyCodes,
+            boolean containsPersonalInfo,
+            List<String> personalInfoTypes,
+            boolean autoProcessed
+    ) {
+        Optional<AiModerationAnalysis> existingAnalysis = aiModerationAnalysisRepository.findByReport(report);
+        if (existingAnalysis.isPresent()) {
+            if (autoProcessed) {
+                existingAnalysis.get().markAutoProcessed();
+            } else if (decision == ModerationDecision.REVIEW_REQUIRED) {
+                existingAnalysis.get().markReviewRequired();
+            }
+            return existingAnalysis.get();
+        }
+
+        AiModerationAnalysis analysis = new AiModerationAnalysis(
+                report,
+                new ModerationResult(
+                        "MODERATION_POLICY_V1",
+                        category,
+                        decision,
+                        riskScore,
+                        confidenceScore,
+                        policyCodes,
+                        containsPersonalInfo,
+                        personalInfoTypes,
+                        true,
+                        "DataLoader 시연용 AI 분석 결과",
+                        "demo-moderation-v1"
+                ),
+                true
+        );
+        if (autoProcessed) {
+            analysis.markAutoProcessed();
+        } else if (decision == ModerationDecision.REVIEW_REQUIRED) {
+            analysis.markReviewRequired();
+        }
+        return aiModerationAnalysisRepository.save(analysis);
+    }
+
+    private void upsertFileAttachment(Member uploader, String targetType, Long targetId, String originalName) {
+        boolean exists = fileAttachmentRepository.findByTargetTypeAndTargetId(targetType, targetId).stream()
+                .anyMatch(file -> originalName.equals(file.getOriginalName()));
+        if (exists) {
+            return;
+        }
+
+        fileAttachmentRepository.save(FileAttachment.builder()
+                .uploader(uploader)
+                .targetType(targetType)
+                .targetId(targetId)
+                .originalName(originalName)
+                .storedPath("")
+                .extension("jpg")
+                .fileSize(2048L)
+                .build());
     }
 
     private String createTargetType(int i) {

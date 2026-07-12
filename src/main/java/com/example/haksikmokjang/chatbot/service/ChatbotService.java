@@ -1,5 +1,8 @@
 package com.example.haksikmokjang.chatbot.service;
 
+import com.example.haksikmokjang.ai.recommendation.service.RestaurantRecommendationService;
+import com.example.haksikmokjang.member.core.domain.Member;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
@@ -7,19 +10,36 @@ import org.springframework.web.client.RestTemplate;
 import java.util.*;
 
 @Service
+@RequiredArgsConstructor
 public class ChatbotService {
 
     private final RestTemplate restTemplate = new RestTemplate();
+    private final RestaurantRecommendationService restaurantRecommendationService;
 
     // 🚨 application.properties 나 application.yml 에 gemini.api.key=오빠키값 설정해두기!
-    @Value("${gemini.api.key}")
+    @Value("${ai.gemini.api-key:${gemini.api.key:}}")
     private String geminiApiKey;
 
+    @Value("${ai.gemini.model:gemini-3.5-flash}")
+    private String geminiModel;
+
     @SuppressWarnings("unchecked")
-    public String getAiResponse(String userMessage, String preferredFood) {
+    public String getAiResponse(String userMessage, String preferredFood, Member member) {
+        return getAiResponse(userMessage, preferredFood, member, null, null);
+    }
+
+    public String getAiResponse(String userMessage, String preferredFood, Member member, Double lat, Double lng) {
+        if (isRestaurantRecommendationIntent(userMessage)) {
+            return restaurantRecommendationService.recommendForChatbot(
+                    member,
+                    extractRequestedCategory(userMessage, preferredFood),
+                    lat,
+                    lng
+            );
+        }
 
         //제미나이 API 엔드포인트
-        String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + geminiApiKey;
+        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -88,5 +108,35 @@ public class ChatbotService {
             e.printStackTrace();
             return " 다시 한번 물어봐주세요.";
         }
+    }
+
+    private boolean isRestaurantRecommendationIntent(String message) {
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        String normalized = message.replaceAll("\\s+", "");
+        if (normalized.contains("매칭추천")) {
+            return false;
+        }
+        boolean asksRecommendation = normalized.contains("추천");
+        boolean restaurantContext = normalized.contains("맛집")
+                || normalized.contains("음식")
+                || normalized.contains("메뉴")
+                || normalized.contains("식당")
+                || normalized.contains("밥")
+                || normalized.contains("점심")
+                || normalized.contains("저녁");
+        return asksRecommendation && restaurantContext;
+    }
+
+    private String extractRequestedCategory(String message, String preferredFood) {
+        if (message != null) {
+            for (String category : List.of("한식", "중식", "일식", "양식")) {
+                if (message.contains(category)) {
+                    return category;
+                }
+            }
+        }
+        return preferredFood;
     }
 }

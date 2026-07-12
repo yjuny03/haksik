@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Limit;
 
 public interface OwnerProfileRepository extends JpaRepository<OwnerProfile, Long> {
 
@@ -20,6 +21,10 @@ public interface OwnerProfileRepository extends JpaRepository<OwnerProfile, Long
     Optional<OwnerProfile> findByMember(Member member);
 
     boolean existsByMember(Member member);
+
+    long countByApprovalStatus(ApprovalStatus approvalStatus);
+
+    List<OwnerProfile> findByOrderByCreatedAtDesc(Limit limit);
 
     // 점주 신청 검색 페이지 조회
     @Query("""

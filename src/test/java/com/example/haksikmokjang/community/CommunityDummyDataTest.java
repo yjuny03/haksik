@@ -22,6 +22,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.annotation.Rollback;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 // 🚨 Enum 패키지 경로는 Alt+Enter로 자동 임포트 하십시오.
@@ -45,57 +46,38 @@ public class CommunityDummyDataTest {
     void insertDummyData() {
 
         // 🚨 팩트: DB에 이미 깔려있는 '인덕대학교' 데이터를 이메일 도메인으로 긁어옵니다.
-        // 만약 없으면 RuntimeException을 터뜨려 테스트를 멈춥니다.
+        // 없으면 테스트 데이터 기준으로 생성합니다.
         School indukSchool = schoolRepository.findByEmailDomain("induk.ac.kr")
-                .orElseThrow(() -> new RuntimeException("DB에 인덕대학교 데이터가 없습니다. 먼저 School 데이터를 세팅하세요."));
+                .orElseGet(() -> schoolRepository.save(
+                        School.builder()
+                                .schoolName("인덕대학교")
+                                .emailDomain("induk.ac.kr")
+                                .latitude(BigDecimal.valueOf(37.631668))
+                                .longitude(BigDecimal.valueOf(127.054045))
+                                .build()
+                ));
 
         // 1. 테스트 유저 A (작성자) 생성
-        Member memberA = Member.builder()
-                .loginId("qwer")
-                .passwordHash(passwordEncoder.encode("qwer1234"))
-                .email("userA@induk.ac.kr")
-                .accountStatus(AccountStatus.ACTIVE)
-                .role(MemberRole.USER)
-                .build();
-        memberRepository.save(memberA);
-
-        UserProfile profileA = UserProfile.builder()
-                .member(memberA)
-                .name("김근육")
-                .nickname("헬창대학생")
-                .department("스포츠의학과")
-                .gender(Gender.M)
-                .birthDate(LocalDate.of(2004, 1, 1))
-                .noShowCount(0)
-                .mannerTemperature(new java.math.BigDecimal("36.5"))
-                // 인덕대학교 연결
-                .school(indukSchool)
-                .build();
-        userProfileRepository.save(profileA);
+        Member memberA = getOrCreateMember("qwer", "userA@induk.ac.kr");
+        getOrCreateProfile(
+                memberA,
+                indukSchool,
+                "김근육",
+                "헬창대학생",
+                "스포츠의학과",
+                LocalDate.of(2004, 1, 1)
+        );
 
         // 2. 테스트 유저 B (댓글러) 생성
-        Member memberB = Member.builder()
-                .loginId("1234")
-                .passwordHash(passwordEncoder.encode("qwer1234"))
-                .email("userB@induk.ac.kr") // 같은 학교로 세팅
-                .accountStatus(AccountStatus.ACTIVE)
-                .role(MemberRole.USER)
-                .build();
-        memberRepository.save(memberB);
-
-        UserProfile profileB = UserProfile.builder()
-                .member(memberB)
-                .name("이단백")
-                .nickname("3대500")
-                .department("컴퓨터공학과")
-                .gender(Gender.M)
-                .birthDate(LocalDate.of(2004, 5, 5))
-                .noShowCount(0)
-                .mannerTemperature(new java.math.BigDecimal("36.5"))
-                // 인덕대학교로 연결
-                .school(indukSchool)
-                .build();
-        userProfileRepository.save(profileB);
+        Member memberB = getOrCreateMember("1234", "userB@induk.ac.kr");
+        getOrCreateProfile(
+                memberB,
+                indukSchool,
+                "이단백",
+                "3대500",
+                "컴퓨터공학과",
+                LocalDate.of(2004, 5, 5)
+        );
 
         // 3. 테스트 게시글 생성
         Post post1 = Post.builder()
@@ -108,7 +90,10 @@ public class CommunityDummyDataTest {
                 // Post 엔티티에도 School 매핑이 있다면 연결
                 .school(indukSchool)
                 .build();
-        postRepository.save(post1);
+        Post savedPost1 = postRepository.findAll().stream()
+                .filter(post -> "오늘 학교 식당 제육볶음 매크로 팩트 체크합니다.".equals(post.getTitle()))
+                .findFirst()
+                .orElseGet(() -> postRepository.save(post1));
 
         Post post2 = Post.builder()
                 .member(memberA)
@@ -118,27 +103,73 @@ public class CommunityDummyDataTest {
                 .category(PostCategory.QUESTION)
                 .anonymousYn("Y")
                 .build();
-        postRepository.save(post2);
+        postRepository.findAll().stream()
+                .filter(post -> "프리웨이트 존 벤치프레스 사용 시간 질문".equals(post.getTitle()))
+                .findFirst()
+                .orElseGet(() -> postRepository.save(post2));
 
         // 4. 테스트 댓글 생성
         Comment comment1 = Comment.builder()
-                .post(post1)
+                .post(savedPost1)
                 .member(memberB)
                 .content("제육에 닭가슴살 100g 챙겨가서 비벼 먹으면 벌크업 식단 뚝딱입니다.")
                 .anonymousYn("N")
                 .build();
-        commentRepository.save(comment1);
+        Comment savedComment1 = commentRepository.findAll().stream()
+                .filter(comment -> "제육에 닭가슴살 100g 챙겨가서 비벼 먹으면 벌크업 식단 뚝딱입니다.".equals(comment.getContent()))
+                .findFirst()
+                .orElseGet(() -> commentRepository.save(comment1));
 
         // 5. 대댓글 생성
         Comment reply1 = Comment.builder()
-                .post(post1)
+                .post(savedPost1)
                 .member(memberA)
-                .parentComment(comment1)
+                .parentComment(savedComment1)
                 .content("오, 내일 바로 실행해 보겠습니다. 꿀팁 감사합니다.")
                 .anonymousYn("N")
                 .build();
-        commentRepository.save(reply1);
+        commentRepository.findAll().stream()
+                .filter(comment -> "오, 내일 바로 실행해 보겠습니다. 꿀팁 감사합니다.".equals(comment.getContent()))
+                .findFirst()
+                .orElseGet(() -> commentRepository.save(reply1));
 
         System.out.println("========== 더미 데이터 세팅 완료 ==========");
+    }
+
+    private Member getOrCreateMember(String loginId, String email) {
+        return memberRepository.findByLoginId(loginId)
+                .orElseGet(() -> memberRepository.save(
+                        Member.builder()
+                                .loginId(loginId)
+                                .passwordHash(passwordEncoder.encode("qwer1234"))
+                                .email(email)
+                                .accountStatus(AccountStatus.ACTIVE)
+                                .role(MemberRole.USER)
+                                .build()
+                ));
+    }
+
+    private UserProfile getOrCreateProfile(
+            Member member,
+            School school,
+            String name,
+            String nickname,
+            String department,
+            LocalDate birthDate
+    ) {
+        return userProfileRepository.findByMember(member)
+                .orElseGet(() -> userProfileRepository.save(
+                        UserProfile.builder()
+                                .member(member)
+                                .name(name)
+                                .nickname(nickname)
+                                .department(department)
+                                .gender(Gender.M)
+                                .birthDate(birthDate)
+                                .noShowCount(0)
+                                .mannerTemperature(new BigDecimal("36.5"))
+                                .school(school)
+                                .build()
+                ));
     }
 }

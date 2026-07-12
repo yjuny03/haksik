@@ -16,11 +16,20 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
+import java.util.Set;
 
 
 @Service
 @RequiredArgsConstructor
 public class NotificationService {
+
+    private static final Set<String> ADMIN_NOTIFICATION_TYPES = Set.of(
+            "ADMIN_AI_REVIEW_REQUIRED",
+            "ADMIN_AI_FAILED",
+            "ADMIN_AI_REPORT_PROCESSED",
+            "ADMIN_OWNER_APPROVAL_PENDING",
+            "ADMIN_REPEATED_REPORT"
+    );
     private final NotificationRepository notificationRepository;
     private final MemberRepository memberRepository;
 
@@ -203,6 +212,43 @@ public class NotificationService {
         int unreadCount = getCollapsedUnreadCount(collapsedNotifications);
 
         return Map.of("notifications", notis, "unreadCount", unreadCount);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getAdminNotifications(String loginId) {
+        Member member = memberRepository.findByLoginId(loginId)
+                .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
+        List<Notification> notifications = notificationRepository.findByMemberOrderByCreatedAtDesc(member)
+                .stream()
+                .filter(notification -> ADMIN_NOTIFICATION_TYPES.contains(notification.getNotificationType()))
+                .toList();
+        List<NotificationResponse> responses = notifications.stream()
+                .limit(30)
+                .map(NotificationResponse::new)
+                .toList();
+        long unreadCount = notifications.stream().filter(notification -> "N".equals(notification.getReadYn())).count();
+        return Map.of("notifications", responses, "unreadCount", unreadCount);
+    }
+
+    @Transactional
+    public void readAdminNotification(Long notificationId, String loginId) {
+        Member member = memberRepository.findByLoginId(loginId)
+                .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
+        notificationRepository.findById(notificationId)
+                .filter(notification -> notification.getMember().getMemberId().equals(member.getMemberId()))
+                .filter(notification -> ADMIN_NOTIFICATION_TYPES.contains(notification.getNotificationType()))
+                .ifPresent(Notification::markAsRead);
+    }
+
+    @Transactional
+    public void readAllAdminNotifications(String loginId) {
+        Member member = memberRepository.findByLoginId(loginId)
+                .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
+        notificationRepository.findByMemberOrderByCreatedAtDesc(member)
+                .stream()
+                .filter(notification -> ADMIN_NOTIFICATION_TYPES.contains(notification.getNotificationType()))
+                .filter(notification -> "N".equals(notification.getReadYn()))
+                .forEach(Notification::markAsRead);
     }
 
     @Transactional

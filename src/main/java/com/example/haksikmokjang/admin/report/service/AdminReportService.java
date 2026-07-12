@@ -6,6 +6,8 @@ import com.example.haksikmokjang.admin.report.dto.AdminReportDetailResponse;
 import com.example.haksikmokjang.admin.report.dto.AdminReportListResponse;
 import com.example.haksikmokjang.admin.report.dto.AdminReportProcessRequest;
 import com.example.haksikmokjang.admin.report.repository.ReportProcessHistoryRepository;
+import com.example.haksikmokjang.ai.moderation.dto.AiModerationAnalysisResponse;
+import com.example.haksikmokjang.ai.moderation.repository.AiModerationAnalysisRepository;
 import com.example.haksikmokjang.fileattachment.dto.FileAttachmentResponse;
 import com.example.haksikmokjang.fileattachment.repository.FileAttachmentRepository;
 import com.example.haksikmokjang.global.common.dto.PageResponse;
@@ -18,6 +20,7 @@ import com.example.haksikmokjang.notification.domain.Notification;
 import com.example.haksikmokjang.notification.service.NotificationService;
 import com.example.haksikmokjang.report.domain.Report;
 import com.example.haksikmokjang.report.domain.ReportStatus;
+import com.example.haksikmokjang.report.domain.ReportProcessorType;
 import com.example.haksikmokjang.report.repository.ReportRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -44,6 +47,7 @@ public class AdminReportService {
     private final TrustService trustService;
     private final FileAttachmentRepository fileAttachmentRepository;
     private final ReportProcessHistoryRepository reportProcessHistoryRepository;
+    private final AiModerationAnalysisRepository aiModerationAnalysisRepository;
 
     // 신고 목록 검색 페이지 조회
     public PageResponse<AdminReportListResponse> findReports(
@@ -69,7 +73,10 @@ public class AdminReportService {
                 pageable
         );
 
-        Page<AdminReportListResponse> response = reports.map(AdminReportListResponse::from);
+        Page<AdminReportListResponse> response = reports.map(report -> AdminReportListResponse.from(
+                report,
+                reportRepository.countByTargetTypeAndTargetId(report.getTargetType(), report.getTargetId())
+        ));
 
         return PageResponse.from(response);
     }
@@ -119,7 +126,13 @@ public class AdminReportService {
             );
         }
 
-        return detail.withAttachments(findTargetAttachments(report));
+        AiModerationAnalysisResponse aiAnalysis = aiModerationAnalysisRepository.findByReport(report)
+                .map(AiModerationAnalysisResponse::from)
+                .orElse(null);
+
+        return detail
+                .withAttachments(findTargetAttachments(report))
+                .withAiAnalysis(aiAnalysis);
     }
 
     // 신고 대상 첨부파일 조회
@@ -196,7 +209,8 @@ public class AdminReportService {
                 afterChatDeleted,
                 targetWriter,
                 penaltyResult,
-                admin
+                admin,
+                ReportProcessorType.ADMIN
         );
 
         sendReportReporterResolvedNotification(
@@ -204,6 +218,52 @@ public class AdminReportService {
                 report,
                 request.getProcessedReason()
         );
+    }
+
+    // AI 자동 처리는 가역적 숨김과 복구 이력만 남기며 회원 제재는 수행하지 않는다.
+    @Transactional
+    public AiAutoResolveResult autoResolveReport(Long reportId, String processedReason) {
+        Report report = reportRepository.findById(reportId)
+                .orElseThrow(() -> new CustomException(ErrorCode.REPORT_NOT_FOUND));
+
+        if (report.getStatus() != ReportStatus.PENDING) {
+            throw new CustomException(ErrorCode.REPORT_ALREADY_PROCESSED);
+        }
+
+        Member targetWriter = findReportedTargetWriter(report);
+        ReportStatus beforeReportStatus = report.getStatus();
+        String beforeTargetStatus = getTargetStatus(report);
+        Boolean beforeChatDeleted = getChatDeleted(report);
+
+        hideReportedTarget(report);
+
+        String afterTargetStatus = getTargetStatus(report);
+        Boolean afterChatDeleted = getChatDeleted(report);
+        report.resolveByAi(processedReason);
+
+        TrustService.TrustPenaltyApplyResult penaltyResult = targetWriter == null
+                ? null
+                : trustService.applyAiReportPenalty(targetWriter, report.getReportId());
+
+        saveReportProcessHistory(
+                report,
+                beforeReportStatus,
+                ReportStatus.RESOLVED,
+                beforeTargetStatus,
+                afterTargetStatus,
+                beforeChatDeleted,
+                afterChatDeleted,
+                targetWriter,
+                penaltyResult,
+                null,
+                ReportProcessorType.AI
+        );
+
+        // AI 분석의 새 트랜잭션 안에서 실제 SQL을 즉시 실행해 제약조건 오류를 호출 지점에서 드러낸다.
+        reportRepository.flush();
+        reportProcessHistoryRepository.flush();
+
+        return new AiAutoResolveResult(targetWriter);
     }
 
     // 신고 대상 숨김 처리
@@ -252,7 +312,8 @@ public class AdminReportService {
                 null,
                 null,
                 null,
-                admin
+                admin,
+                ReportProcessorType.ADMIN
         );
 
         sendReportRejectedNotification(
@@ -277,7 +338,8 @@ public class AdminReportService {
 
         String cancelReason = getCancelReason(request);
 
-        if (report.getStatus() == ReportStatus.PENDING) {
+        if (report.getStatus() == ReportStatus.PENDING
+                || report.getStatus() == ReportStatus.CANCELED) {
             throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
         }
 
@@ -293,18 +355,26 @@ public class AdminReportService {
         if (report.getStatus() == ReportStatus.RESOLVED) {
             restoreReportedTarget(report, history);
 
-            trustService.cancelReportPenalty(
-                    history.getPenaltyHistory(),
-                    admin,
-                    history.getBeforeMannerTemperature(),
-                    cancelReason
-            );
+            // AI 자동 처리는 회원 제재를 만들지 않는다. 실제 제재 이력이 있는 수동 처리만 복구한다.
+            if (history.getPenaltyHistory() != null) {
+                trustService.cancelReportPenalty(
+                        history.getPenaltyHistory(),
+                        admin,
+                        history.getBeforeMannerTemperature(),
+                        cancelReason
+                );
+            }
         }
 
         ReportStatus beforeCancelStatus = report.getStatus();
 
-        report.cancelProcess();
+        report.cancelFinalProcess();
         history.cancel(admin, cancelReason);
+
+        if (history.getProcessorType() == ReportProcessorType.AI) {
+            aiModerationAnalysisRepository.findByReport(report)
+                    .ifPresent(analysis -> analysis.markRestored(cancelReason));
+        }
 
         sendReportCancelNotification(
                 report,
@@ -317,7 +387,8 @@ public class AdminReportService {
     // 신고 최종 처리 여부 검증
     private void validateReportProcessable(Report report) {
         if (report.getStatus() == ReportStatus.RESOLVED
-                || report.getStatus() == ReportStatus.REJECTED) {
+                || report.getStatus() == ReportStatus.REJECTED
+                || report.getStatus() == ReportStatus.CANCELED) {
             throw new CustomException(ErrorCode.REPORT_ALREADY_PROCESSED);
         }
     }
@@ -532,7 +603,8 @@ public class AdminReportService {
             Boolean afterChatDeleted,
             Member targetWriter,
             TrustService.TrustPenaltyApplyResult penaltyResult,
-            Member admin
+            Member admin,
+            ReportProcessorType processorType
     ) {
         BigDecimal beforeMannerTemperature = null;
         BigDecimal afterMannerTemperature = null;
@@ -559,9 +631,13 @@ public class AdminReportService {
                 beforeMannerTemperature,
                 afterMannerTemperature,
                 penaltyPoint,
-                admin
+                admin,
+                processorType
         );
 
         reportProcessHistoryRepository.save(history);
+    }
+
+    public record AiAutoResolveResult(Member targetWriter) {
     }
 }

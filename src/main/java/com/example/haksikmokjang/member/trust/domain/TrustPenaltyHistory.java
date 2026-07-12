@@ -2,6 +2,7 @@ package com.example.haksikmokjang.member.trust.domain;
 
 import com.example.haksikmokjang.global.entity.CreatedTimeEntity;
 import com.example.haksikmokjang.member.core.domain.Member;
+import com.example.haksikmokjang.report.domain.ReportProcessorType;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -47,6 +48,10 @@ public class TrustPenaltyHistory extends CreatedTimeEntity {
     @Column(name = "reason", nullable = false, length = 500)
     private String reason;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "processor_type", length = 20)
+    private ReportProcessorType processorType;
+
     @Column(name = "canceled_yn", nullable = false, length = 1)
     private String canceledYn = "N";
 
@@ -66,13 +71,15 @@ public class TrustPenaltyHistory extends CreatedTimeEntity {
             TrustPenaltySourceType sourceType,
             Long sourceId,
             BigDecimal penaltyPoint,
-            String reason
+            String reason,
+            ReportProcessorType processorType
     ) {
         this.targetMember = targetMember;
         this.sourceType = sourceType;
         this.sourceId = sourceId;
         this.penaltyPoint = penaltyPoint;
         this.reason = reason;
+        this.processorType = processorType;
         this.canceledYn = "N";
     }
 
@@ -85,11 +92,13 @@ public class TrustPenaltyHistory extends CreatedTimeEntity {
     }
 
     // 취소된 제재 이력 재사용
-    public void reactivate() {
+    public void reactivate(String reason, ReportProcessorType processorType) {
         this.canceledYn = "N";
         this.canceledBy = null;
         this.canceledAt = null;
         this.cancelReason = null;
+        this.reason = reason;
+        this.processorType = processorType;
     }
 
     // 제재 이력 취소 여부 확인

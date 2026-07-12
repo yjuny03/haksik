@@ -11,6 +11,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDateTime;
 
 public interface MemberRepository extends JpaRepository<Member, Long> {
 
@@ -23,6 +24,14 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
     Optional<Member> findByEmail(String email);
 
     Optional<Member> findByLoginIdAndEmail(String loginId, String email);
+
+    List<Member> findAllByRole(MemberRole role);
+
+    long countByRole(MemberRole role);
+
+    long countByLockedYn(String lockedYn);
+
+    long countByCreatedAtGreaterThanEqualAndCreatedAtLessThan(LocalDateTime start, LocalDateTime end);
 
     @Modifying
     @Query
