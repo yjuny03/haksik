@@ -1789,62 +1789,9 @@ function addStoreOptionAndVoteById(storeId) {
 
     if (!store || !currentPlaceFormId) {
         showToastLimited("가게 정보를 찾을 수 없습니다.", "error");
-    if (!store) {
-        showToast("가게 정보를 찾을 수 없습니다.", "error");
         return;
     }
 
-    const existingOption = getExistingStoreOption(storeId);
-
-    if (existingOption && existingOption.optionId) {
-        submitPlaceVoteOption(existingOption.optionId);
-        return;
-    }
-
-    if (storeOptionAdding) {
-        return;
-    }
-
-    storeOptionAdding = true;
-
-    fetch("/api/chat/forms/" + currentPlaceFormId + "/options", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            optionType: "PLACE",
-            placeSource: "STORE",
-            storeId: Number(store.storeId),
-            placeName: store.name,
-            optionText: store.name,
-            address: store.address,
-            latitude: Number(store.latitude),
-            longitude: Number(store.longitude),
-            mapUrl: ""
-        })
-    })
-        .then(function (response) {
-            if (!response.ok) {
-                throw new Error();
-            }
-
-            return response.json();
-        })
-        .then(function (option) {
-            if (option && option.optionId) {
-                submitPlaceVoteOption(option.optionId);
-                return;
-            }
-
-            voteStoreAfterReload(storeId);
-        })
-        .catch(function () {
-            showToastLimited("식당 투표에 실패했습니다.", "error");
-        })
-        .finally(function () {
-            storeOptionAdding = false;
-        });
     addStoreOptionFromStore(store, true);
 }
 

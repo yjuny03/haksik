@@ -52,7 +52,4 @@ tasks.named('test') {
 }
 
 tasks.named('processResources') {
-    exclude 'application-local.properties'
-    exclude 'application-oauth.properties'
-    exclude 'application-secret.properties'
 }
