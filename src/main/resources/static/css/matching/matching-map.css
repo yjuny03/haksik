@@ -342,8 +342,8 @@
 }
 
 .match-btn.sub {
-    background-color: var(--ivory2);
-    color: var(--forest);
+    background-color: #df4a5f;
+    color: white;
 }
 
 .match-btn:disabled {
@@ -744,9 +744,9 @@
 }
 
 .match-info-btn.secondary {
-    background-color: var(--ivory2);
-    color: var(--forest);
-    border: 1px solid var(--line);
+    background-color: #EAF3EE;
+    color: #126b4f;
+    border: none;
 }
 
 /* 프로필 팝업 */

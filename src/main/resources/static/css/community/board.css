@@ -728,16 +728,19 @@
     height: 44px;
     padding: 0 18px;
 
-    border: none;
+    border: 2px solid #fff7e8;
     border-radius: 999px;
 
-    background: #f5ead8;
-    color: #123f35;
+    background: #6C9A8B;
+    color: white;
 
     font-size: 14px;
     font-weight: 800;
 
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
+    box-shadow:
+            0 0 0 2px rgba(18, 107, 79, 0.22),
+            0 8px 20px rgba(0, 0, 0, 0.14);
+
     cursor: pointer;
 }
 

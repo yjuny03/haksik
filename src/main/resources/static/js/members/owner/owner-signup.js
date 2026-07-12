@@ -1,18 +1,29 @@
 // haksik owner signup js
 
-const OWNER_SIGNUP_URL = '/api/members/signup/owner';
-const LOGIN_ID_CHECK_URL = '/api/members/check-owner-login-id';
-const EMAIL_CHECK_URL = '/api/members/check-owner-email';
-const BUSINESS_NUMBER_CHECK_URL = '/api/members/check-business-number';
+var OWNER_SIGNUP_URL = '/api/members/signup/owner';
+var LOGIN_ID_CHECK_URL = '/api/members/check-owner-login-id';
+var EMAIL_CHECK_URL = '/api/members/check-owner-email';
+var BUSINESS_NUMBER_CHECK_URL = '/api/members/check-business-number';
 
-let isLoginIdChecked = false;
-let isEmailChecked = false;
-let isBusinessNumberChecked = false;
+var isLoginIdChecked = false;
+var isEmailChecked = false;
+var isBusinessNumberChecked = false;
 
-const ownerInputWarningState = {};
+// 입력 경고 debounce / notify 중복 방지 상태
+var ownerInputWarningTimers = {};
+var ownerInputWarningLastShownAt = {};
+var ownerNotifyCooldownState = {};
+
+// 요청 중복 방지 상태
+var ownerCheckRunningState = {};
+var ownerSignupSubmitting = false;
+
+var OWNER_INPUT_WARNING_DELAY = 600;
+var OWNER_INPUT_WARNING_COOLDOWN = 1800;
+var OWNER_NOTIFY_COOLDOWN = 1200;
 
 document.addEventListener('DOMContentLoaded', function () {
-    const ownerSignupForm = document.getElementById('ownerSignupForm');
+    var ownerSignupForm = document.getElementById('ownerSignupForm');
 
     if (!ownerSignupForm) {
         return;
@@ -20,12 +31,39 @@ document.addEventListener('DOMContentLoaded', function () {
 
     setupOwnerSignupInputRules();
 
-    ownerSignupForm.addEventListener('submit', submitOwnerSignup);
+    bindOwnerEventOnce(ownerSignupForm, 'submit', 'ownerSignupSubmitBound', submitOwnerSignup);
 
     initLoginIdInput();
     initEmailInput();
     initBusinessNumberInput();
 });
+
+// 같은 이벤트가 여러 번 붙는 것 방지
+function bindOwnerEventOnce(element, eventName, bindKey, handler) {
+    if (!element) {
+        return;
+    }
+
+    if (element.dataset[bindKey] === 'true') {
+        return;
+    }
+
+    element.dataset[bindKey] = 'true';
+    element.addEventListener(eventName, handler);
+}
+
+// 같은 알림이 짧은 시간 안에 계속 쌓이는 것 방지
+function notifyLimited(message, type, key) {
+    var notifyKey = key || message;
+    var now = Date.now();
+
+    if (ownerNotifyCooldownState[notifyKey] && now - ownerNotifyCooldownState[notifyKey] < OWNER_NOTIFY_COOLDOWN) {
+        return;
+    }
+
+    ownerNotifyCooldownState[notifyKey] = now;
+    notify(message, type);
+}
 
 function setupOwnerSignupInputRules() {
     addOwnerInputWarning('loginId', {
@@ -77,13 +115,19 @@ function setupOwnerSignupInputRules() {
 }
 
 function addOwnerInputWarning(id, options) {
-    const input = document.getElementById(id);
+    var input = document.getElementById(id);
 
     if (!input) {
         return;
     }
 
-    let isComposing = false;
+    if (input.dataset.ownerWarningBound === 'true') {
+        return;
+    }
+
+    input.dataset.ownerWarningBound = 'true';
+
+    var isComposing = false;
 
     input.addEventListener('compositionstart', function () {
         isComposing = true;
@@ -107,8 +151,8 @@ function addOwnerInputWarning(id, options) {
     });
 }
 
-function checkOwnerInputWarning(input, id, options, forceShow = false) {
-    const value = input.value;
+function checkOwnerInputWarning(input, id, options, forceShow) {
+    var value = input.value;
 
     if (!value) {
         clearOwnerInputWarning(id);
@@ -116,38 +160,82 @@ function checkOwnerInputWarning(input, id, options, forceShow = false) {
     }
 
     if (options.maxLength && value.length > options.maxLength) {
-        showOwnerInputWarningOnce(id, 'length', options.message, forceShow);
+        showOwnerInputWarningOnce(id, 'length', options.message, forceShow === true);
         return;
     }
 
     if (options.pattern && !options.pattern.test(value)) {
-        showOwnerInputWarningOnce(id, 'pattern', options.message, forceShow);
+        showOwnerInputWarningOnce(id, 'pattern', options.message, forceShow === true);
         return;
     }
 
     clearOwnerInputWarning(id);
 }
 
-function showOwnerInputWarningOnce(id, type, message, forceShow = false) {
-    const key = id + ':' + type;
+// 빠르게 입력 중이면 기다렸다가 한 번만 보여주고, 계속 틀리면 일정 시간 뒤 다시 보여줌
+function showOwnerInputWarningOnce(id, type, message, forceShow) {
+    var key = id + ':' + type;
+    var input = document.getElementById(id);
 
-    if (!forceShow && ownerInputWarningState[key]) {
+    if (!input) {
         return;
     }
 
-    ownerInputWarningState[key] = true;
-    notify(message, 'warning');
+    var currentValue = input.value;
+    var delay = forceShow ? 0 : OWNER_INPUT_WARNING_DELAY;
+
+    clearOwnerInputWarningTimers(id);
+
+    ownerInputWarningTimers[key] = setTimeout(function () {
+        var latestInput = document.getElementById(id);
+
+        if (!latestInput) {
+            return;
+        }
+
+        var latestValue = latestInput.value;
+
+        // 기다리는 동안 값이 바뀌었으면 이전 경고는 무시
+        if (latestValue !== currentValue) {
+            return;
+        }
+
+        var now = Date.now();
+
+        // 같은 입력창의 같은 오류가 너무 자주 뜨는 것 방지
+        if (ownerInputWarningLastShownAt[key] && now - ownerInputWarningLastShownAt[key] < OWNER_INPUT_WARNING_COOLDOWN) {
+            return;
+        }
+
+        ownerInputWarningLastShownAt[key] = now;
+        notifyLimited(message, 'warning', key);
+    }, delay);
 }
 
-function clearOwnerInputWarning(id) {
-    Object.keys(ownerInputWarningState).forEach(function (key) {
+function clearOwnerInputWarningTimers(id) {
+    Object.keys(ownerInputWarningTimers).forEach(function (key) {
         if (key.startsWith(id + ':')) {
-            delete ownerInputWarningState[key];
+            clearTimeout(ownerInputWarningTimers[key]);
+            delete ownerInputWarningTimers[key];
         }
     });
 }
 
-function notify(message, type = 'info') {
+function clearOwnerInputWarning(id) {
+    clearOwnerInputWarningTimers(id);
+
+    Object.keys(ownerInputWarningLastShownAt).forEach(function (key) {
+        if (key.startsWith(id + ':')) {
+            delete ownerInputWarningLastShownAt[key];
+        }
+    });
+}
+
+function notify(message, type) {
+    if (!type) {
+        type = 'info';
+    }
+
     if (typeof showToast === 'function') {
         showToast(message, type);
         return;
@@ -164,15 +252,15 @@ function setupPasswordToggleButtons() {
 
         button.dataset.bound = 'true';
 
-        const targetId = button.dataset.target;
-        const input = document.getElementById(targetId);
+        var targetId = button.dataset.target;
+        var input = document.getElementById(targetId);
 
         if (!input) {
             return;
         }
 
         button.addEventListener('click', function () {
-            const isPassword = input.type === 'password';
+            var isPassword = input.type === 'password';
 
             input.type = isPassword ? 'text' : 'password';
             button.innerText = isPassword ? '숨김' : '보기';
@@ -181,46 +269,46 @@ function setupPasswordToggleButtons() {
 }
 
 function initLoginIdInput() {
-    const loginIdInput = document.getElementById('loginId');
+    var loginIdInput = document.getElementById('loginId');
 
     if (!loginIdInput) {
         return;
     }
 
-    loginIdInput.addEventListener('input', function () {
+    bindOwnerEventOnce(loginIdInput, 'input', 'ownerLoginIdResetBound', function () {
         isLoginIdChecked = false;
         resetCheckButton('loginIdCheckBtn');
     });
 }
 
 function initEmailInput() {
-    const emailInput = document.getElementById('email');
+    var emailInput = document.getElementById('email');
 
     if (!emailInput) {
         return;
     }
 
-    emailInput.addEventListener('input', function () {
+    bindOwnerEventOnce(emailInput, 'input', 'ownerEmailResetBound', function () {
         isEmailChecked = false;
         resetCheckButton('emailCheckBtn');
     });
 }
 
 function initBusinessNumberInput() {
-    const businessNumberInput = document.getElementById('businessNumber');
+    var businessNumberInput = document.getElementById('businessNumber');
 
     if (!businessNumberInput) {
         return;
     }
 
-    businessNumberInput.addEventListener('input', function () {
+    bindOwnerEventOnce(businessNumberInput, 'input', 'ownerBusinessNumberResetBound', function () {
         isBusinessNumberChecked = false;
         resetCheckButton('businessNumberCheckBtn');
     });
 }
 
 function resetCheckButton(buttonId) {
-    const checkBtn = document.getElementById(buttonId);
+    var checkBtn = document.getElementById(buttonId);
 
     if (!checkBtn) {
         return;
@@ -231,7 +319,7 @@ function resetCheckButton(buttonId) {
 }
 
 function completeCheckButton(buttonId) {
-    const checkBtn = document.getElementById(buttonId);
+    var checkBtn = document.getElementById(buttonId);
 
     if (!checkBtn) {
         return;
@@ -239,6 +327,34 @@ function completeCheckButton(buttonId) {
 
     checkBtn.innerText = '완료';
     checkBtn.classList.add('success');
+}
+
+function setCheckButtonLoading(buttonId, loadingText) {
+    var checkBtn = document.getElementById(buttonId);
+
+    if (!checkBtn) {
+        return;
+    }
+
+    checkBtn.disabled = true;
+    checkBtn.dataset.originalText = checkBtn.innerText;
+    checkBtn.innerText = loadingText || '확인중';
+}
+
+function releaseCheckButtonLoading(buttonId, success) {
+    var checkBtn = document.getElementById(buttonId);
+
+    if (!checkBtn) {
+        return;
+    }
+
+    checkBtn.disabled = false;
+
+    if (!success) {
+        checkBtn.innerText = checkBtn.dataset.originalText || '중복';
+    }
+
+    delete checkBtn.dataset.originalText;
 }
 
 async function safeJson(response) {
@@ -282,13 +398,13 @@ function isValidOwnerName(ownerName) {
 }
 
 function isValidOwnerPhone(ownerPhone) {
-    const phoneNumbers = normalizePhone(ownerPhone);
+    var phoneNumbers = normalizePhone(ownerPhone);
 
     return /^(01[016789]\d{7,8}|0507\d{8})$/.test(phoneNumbers);
 }
 
 function isValidBusinessNumber(businessNumber) {
-    const numbers = normalizeBusinessNumber(businessNumber);
+    var numbers = normalizeBusinessNumber(businessNumber);
 
     return /^\d{10}$/.test(numbers);
 }
@@ -338,154 +454,254 @@ function validateOwnerSignupInput(data) {
 }
 
 async function checkLoginId() {
-    const loginIdInput = document.getElementById('loginId');
+    if (ownerCheckRunningState.loginId) {
+        return;
+    }
+
+    var loginIdInput = document.getElementById('loginId');
 
     if (!loginIdInput || !loginIdInput.value.trim()) {
-        notify('아이디를 입력해주세요.', 'error');
+        notifyLimited('아이디를 입력해주세요.', 'error', 'owner-login-id-empty');
         return;
     }
 
-    const loginId = loginIdInput.value.trim();
+    var loginId = loginIdInput.value.trim();
 
     if (!isValidLoginId(loginId)) {
-        notify('아이디는 영문/숫자로 4자 이상, 20자 이내로 입력해주세요.', 'warning');
+        notifyLimited('아이디는 영문/숫자로 4자 이상, 20자 이내로 입력해주세요.', 'warning', 'owner-login-id-invalid');
         return;
     }
 
-    const response = await fetch(
-        `${LOGIN_ID_CHECK_URL}?loginId=${encodeURIComponent(loginId)}`
-    );
+    ownerCheckRunningState.loginId = true;
+    setCheckButtonLoading('loginIdCheckBtn', '확인중');
 
-    const result = await safeJson(response);
+    try {
+        var response = await fetch(
+            LOGIN_ID_CHECK_URL + '?loginId=' + encodeURIComponent(loginId)
+        );
 
-    if (!response.ok || !result || result.success === false) {
-        notify(getErrorMessage(result, '아이디 중복 확인 중 오류가 발생했습니다.'), 'error');
-        return;
+        var result = await safeJson(response);
+
+        // 요청 중 사용자가 값을 바꿨으면 이전 응답은 무시
+        if (loginIdInput.value.trim() !== loginId) {
+            isLoginIdChecked = false;
+            resetCheckButton('loginIdCheckBtn');
+            return;
+        }
+
+        if (!response.ok || !result || result.success === false) {
+            notifyLimited(getErrorMessage(result, '아이디 중복 확인 중 오류가 발생했습니다.'), 'error', 'owner-login-id-check-error');
+            isLoginIdChecked = false;
+            resetCheckButton('loginIdCheckBtn');
+            return;
+        }
+
+        if (!result.data || typeof result.data.available !== 'boolean') {
+            notifyLimited('아이디 중복 확인 응답 데이터가 올바르지 않습니다.', 'error', 'owner-login-id-check-invalid-response');
+            isLoginIdChecked = false;
+            resetCheckButton('loginIdCheckBtn');
+            return;
+        }
+
+        if (result.data.available) {
+            isLoginIdChecked = true;
+            completeCheckButton('loginIdCheckBtn');
+            notifyLimited('사용 가능한 아이디입니다.', 'success', 'owner-login-id-available');
+            return;
+        }
+
+        isLoginIdChecked = false;
+        resetCheckButton('loginIdCheckBtn');
+        notifyLimited('이미 사용 중인 아이디입니다.', 'error', 'owner-login-id-duplicated');
+
+    } catch (e) {
+        isLoginIdChecked = false;
+        resetCheckButton('loginIdCheckBtn');
+        notifyLimited('아이디 중복 확인 중 오류가 발생했습니다.', 'error', 'owner-login-id-fetch-error');
+
+    } finally {
+        ownerCheckRunningState.loginId = false;
+
+        var success = isLoginIdChecked && loginIdInput && loginIdInput.value.trim() === loginId;
+        releaseCheckButtonLoading('loginIdCheckBtn', success);
     }
-
-    if (!result.data || typeof result.data.available !== 'boolean') {
-        notify('아이디 중복 확인 응답 데이터가 올바르지 않습니다.', 'error');
-        return;
-    }
-
-    if (result.data.available) {
-        isLoginIdChecked = true;
-        completeCheckButton('loginIdCheckBtn');
-        notify('사용 가능한 아이디입니다.', 'success');
-        return;
-    }
-
-    isLoginIdChecked = false;
-    resetCheckButton('loginIdCheckBtn');
-    notify('이미 사용 중인 아이디입니다.', 'error');
 }
 
 async function checkEmail() {
-    const emailInput = document.getElementById('email');
+    if (ownerCheckRunningState.email) {
+        return;
+    }
+
+    var emailInput = document.getElementById('email');
 
     if (!emailInput || !emailInput.value.trim()) {
-        notify('이메일을 입력해주세요.', 'error');
+        notifyLimited('이메일을 입력해주세요.', 'error', 'owner-email-empty');
         return;
     }
 
-    const email = emailInput.value.trim();
+    var email = emailInput.value.trim();
 
     if (!isValidEmail(email)) {
-        notify('이메일 형식이 올바르지 않습니다.', 'warning');
+        notifyLimited('이메일 형식이 올바르지 않습니다.', 'warning', 'owner-email-invalid');
         return;
     }
 
-    const response = await fetch(
-        `${EMAIL_CHECK_URL}?email=${encodeURIComponent(email)}`
-    );
+    ownerCheckRunningState.email = true;
+    setCheckButtonLoading('emailCheckBtn', '확인중');
 
-    const result = await safeJson(response);
+    try {
+        var response = await fetch(
+            EMAIL_CHECK_URL + '?email=' + encodeURIComponent(email)
+        );
 
-    if (!response.ok || !result || result.success === false) {
-        notify(getErrorMessage(result, '이메일 중복 확인 중 오류가 발생했습니다.'), 'error');
-        return;
+        var result = await safeJson(response);
+
+        // 요청 중 사용자가 값을 바꿨으면 이전 응답은 무시
+        if (emailInput.value.trim() !== email) {
+            isEmailChecked = false;
+            resetCheckButton('emailCheckBtn');
+            return;
+        }
+
+        if (!response.ok || !result || result.success === false) {
+            notifyLimited(getErrorMessage(result, '이메일 중복 확인 중 오류가 발생했습니다.'), 'error', 'owner-email-check-error');
+            isEmailChecked = false;
+            resetCheckButton('emailCheckBtn');
+            return;
+        }
+
+        if (!result.data || typeof result.data.available !== 'boolean') {
+            notifyLimited('이메일 중복 확인 응답 데이터가 올바르지 않습니다.', 'error', 'owner-email-check-invalid-response');
+            isEmailChecked = false;
+            resetCheckButton('emailCheckBtn');
+            return;
+        }
+
+        if (result.data.available) {
+            isEmailChecked = true;
+            completeCheckButton('emailCheckBtn');
+            notifyLimited('사용 가능한 이메일입니다.', 'success', 'owner-email-available');
+            return;
+        }
+
+        isEmailChecked = false;
+        resetCheckButton('emailCheckBtn');
+        notifyLimited('이미 사용 중인 이메일입니다.', 'error', 'owner-email-duplicated');
+
+    } catch (e) {
+        isEmailChecked = false;
+        resetCheckButton('emailCheckBtn');
+        notifyLimited('이메일 중복 확인 중 오류가 발생했습니다.', 'error', 'owner-email-fetch-error');
+
+    } finally {
+        ownerCheckRunningState.email = false;
+
+        var success = isEmailChecked && emailInput && emailInput.value.trim() === email;
+        releaseCheckButtonLoading('emailCheckBtn', success);
     }
-
-    if (!result.data || typeof result.data.available !== 'boolean') {
-        notify('이메일 중복 확인 응답 데이터가 올바르지 않습니다.', 'error');
-        return;
-    }
-
-    if (result.data.available) {
-        isEmailChecked = true;
-        completeCheckButton('emailCheckBtn');
-        notify('사용 가능한 이메일입니다.', 'success');
-        return;
-    }
-
-    isEmailChecked = false;
-    resetCheckButton('emailCheckBtn');
-    notify('이미 사용 중인 이메일입니다.', 'error');
 }
 
 async function checkBusinessNumber() {
-    const businessNumberInput = document.getElementById('businessNumber');
+    if (ownerCheckRunningState.businessNumber) {
+        return;
+    }
+
+    var businessNumberInput = document.getElementById('businessNumber');
 
     if (!businessNumberInput || !businessNumberInput.value.trim()) {
-        notify('사업자등록번호를 입력해주세요.', 'error');
+        notifyLimited('사업자등록번호를 입력해주세요.', 'error', 'owner-business-number-empty');
         return;
     }
 
-    const businessNumber = businessNumberInput.value.trim();
+    var businessNumber = businessNumberInput.value.trim();
 
     if (!isValidBusinessNumber(businessNumber)) {
-        notify('사업자등록번호는 숫자 10자리로 입력해주세요.', 'warning');
+        notifyLimited('사업자등록번호는 숫자 10자리로 입력해주세요.', 'warning', 'owner-business-number-invalid');
         return;
     }
 
-    const normalizedBusinessNumber = normalizeBusinessNumber(businessNumber);
+    var normalizedBusinessNumber = normalizeBusinessNumber(businessNumber);
 
-    const response = await fetch(
-        `${BUSINESS_NUMBER_CHECK_URL}?businessNumber=${encodeURIComponent(normalizedBusinessNumber)}`
-    );
+    ownerCheckRunningState.businessNumber = true;
+    setCheckButtonLoading('businessNumberCheckBtn', '확인중');
 
-    const result = await safeJson(response);
+    try {
+        var response = await fetch(
+            BUSINESS_NUMBER_CHECK_URL + '?businessNumber=' + encodeURIComponent(normalizedBusinessNumber)
+        );
 
-    if (!response.ok || !result || result.success === false) {
-        notify(getErrorMessage(result, '사업자등록번호 중복 확인 중 오류가 발생했습니다.'), 'error');
-        return;
+        var result = await safeJson(response);
+
+        // 요청 중 사용자가 값을 바꿨으면 이전 응답은 무시
+        if (normalizeBusinessNumber(businessNumberInput.value.trim()) !== normalizedBusinessNumber) {
+            isBusinessNumberChecked = false;
+            resetCheckButton('businessNumberCheckBtn');
+            return;
+        }
+
+        if (!response.ok || !result || result.success === false) {
+            notifyLimited(getErrorMessage(result, '사업자등록번호 중복 확인 중 오류가 발생했습니다.'), 'error', 'owner-business-number-check-error');
+            isBusinessNumberChecked = false;
+            resetCheckButton('businessNumberCheckBtn');
+            return;
+        }
+
+        if (!result.data || typeof result.data.available !== 'boolean') {
+            notifyLimited('사업자등록번호 중복 확인 응답 데이터가 올바르지 않습니다.', 'error', 'owner-business-number-check-invalid-response');
+            isBusinessNumberChecked = false;
+            resetCheckButton('businessNumberCheckBtn');
+            return;
+        }
+
+        if (result.data.available) {
+            isBusinessNumberChecked = true;
+            completeCheckButton('businessNumberCheckBtn');
+            notifyLimited('사용 가능한 사업자등록번호입니다.', 'success', 'owner-business-number-available');
+            return;
+        }
+
+        isBusinessNumberChecked = false;
+        resetCheckButton('businessNumberCheckBtn');
+        notifyLimited('이미 사용 중인 사업자등록번호입니다.', 'error', 'owner-business-number-duplicated');
+
+    } catch (e) {
+        isBusinessNumberChecked = false;
+        resetCheckButton('businessNumberCheckBtn');
+        notifyLimited('사업자등록번호 중복 확인 중 오류가 발생했습니다.', 'error', 'owner-business-number-fetch-error');
+
+    } finally {
+        ownerCheckRunningState.businessNumber = false;
+
+        var success = isBusinessNumberChecked &&
+            businessNumberInput &&
+            normalizeBusinessNumber(businessNumberInput.value.trim()) === normalizedBusinessNumber;
+
+        releaseCheckButtonLoading('businessNumberCheckBtn', success);
     }
-
-    if (!result.data || typeof result.data.available !== 'boolean') {
-        notify('사업자등록번호 중복 확인 응답 데이터가 올바르지 않습니다.', 'error');
-        return;
-    }
-
-    if (result.data.available) {
-        isBusinessNumberChecked = true;
-        completeCheckButton('businessNumberCheckBtn');
-        notify('사용 가능한 사업자등록번호입니다.', 'success');
-        return;
-    }
-
-    isBusinessNumberChecked = false;
-    resetCheckButton('businessNumberCheckBtn');
-    notify('이미 사용 중인 사업자등록번호입니다.', 'error');
 }
 
 async function submitOwnerSignup(event) {
     event.preventDefault();
 
-    const loginId = document.getElementById('loginId').value.trim();
-    const email = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
-    const passwordConfirm = document.getElementById('passwordConfirm').value;
-    const ownerName = document.getElementById('ownerName').value.trim();
-    const ownerPhone = document.getElementById('ownerPhone').value.trim();
-    const businessNumber = document.getElementById('businessNumber').value.trim();
-    const businessName = document.getElementById('businessName').value.trim();
-
-    if (!loginId || !email || !password || !passwordConfirm || !ownerName || !ownerPhone || !businessNumber || !businessName) {
-        notify('필수 입력값을 모두 입력해주세요.', 'error');
+    if (ownerSignupSubmitting) {
         return;
     }
 
-    const validationMessage = validateOwnerSignupInput({
+    var loginId = document.getElementById('loginId').value.trim();
+    var email = document.getElementById('email').value.trim();
+    var password = document.getElementById('password').value;
+    var passwordConfirm = document.getElementById('passwordConfirm').value;
+    var ownerName = document.getElementById('ownerName').value.trim();
+    var ownerPhone = document.getElementById('ownerPhone').value.trim();
+    var businessNumber = document.getElementById('businessNumber').value.trim();
+    var businessName = document.getElementById('businessName').value.trim();
+
+    if (!loginId || !email || !password || !passwordConfirm || !ownerName || !ownerPhone || !businessNumber || !businessName) {
+        notifyLimited('필수 입력값을 모두 입력해주세요.', 'error', 'owner-signup-required');
+        return;
+    }
+
+    var validationMessage = validateOwnerSignupInput({
         loginId: loginId,
         email: email,
         password: password,
@@ -496,31 +712,31 @@ async function submitOwnerSignup(event) {
     });
 
     if (validationMessage) {
-        notify(validationMessage, 'warning');
+        notifyLimited(validationMessage, 'warning', 'owner-signup-validation');
         return;
     }
 
     if (password !== passwordConfirm) {
-        notify('비밀번호가 일치하지 않습니다.', 'error');
+        notifyLimited('비밀번호가 일치하지 않습니다.', 'error', 'owner-signup-password-mismatch');
         return;
     }
 
     if (!isLoginIdChecked) {
-        notify('아이디 중복 확인을 먼저 완료해주세요.', 'error');
+        notifyLimited('아이디 중복 확인을 먼저 완료해주세요.', 'error', 'owner-signup-login-id-not-checked');
         return;
     }
 
     if (!isEmailChecked) {
-        notify('이메일 중복 확인을 먼저 완료해주세요.', 'error');
+        notifyLimited('이메일 중복 확인을 먼저 완료해주세요.', 'error', 'owner-signup-email-not-checked');
         return;
     }
 
     if (!isBusinessNumberChecked) {
-        notify('사업자등록번호 중복 확인을 먼저 완료해주세요.', 'error');
+        notifyLimited('사업자등록번호 중복 확인을 먼저 완료해주세요.', 'error', 'owner-signup-business-number-not-checked');
         return;
     }
 
-    const requestData = {
+    var requestData = {
         loginId: loginId,
         password: password,
         email: email,
@@ -530,24 +746,69 @@ async function submitOwnerSignup(event) {
         ownerPhone: normalizePhone(ownerPhone)
     };
 
-    const response = await fetch(OWNER_SIGNUP_URL, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestData)
-    });
+    var submitBtn = document.querySelector('#ownerSignupForm button[type="submit"], #ownerSignupForm input[type="submit"]');
+    ownerSignupSubmitting = true;
 
-    const result = await safeJson(response);
-
-    if (!response.ok || !result || result.success === false) {
-        notify(getErrorMessage(result, '점주 회원가입에 실패했습니다.'), 'error');
-        return;
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.dataset.originalText = submitBtn.innerText || submitBtn.value || '';
+        if (submitBtn.tagName === 'INPUT') {
+            submitBtn.value = '처리중';
+        } else {
+            submitBtn.innerText = '처리중';
+        }
     }
 
-    notify('점주 회원가입 신청이 완료되었습니다. 로그인 후 승인 상태를 확인해주세요.', 'success');
+    try {
+        var response = await fetch(OWNER_SIGNUP_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData)
+        });
 
-    setTimeout(function () {
-        window.location.href = '/api/view/login';
-    }, 900);
+        var result = await safeJson(response);
+
+        if (!response.ok || !result || result.success === false) {
+            notifyLimited(getErrorMessage(result, '점주 회원가입에 실패했습니다.'), 'error', 'owner-signup-submit-error');
+            ownerSignupSubmitting = false;
+
+            if (submitBtn) {
+                submitBtn.disabled = false;
+
+                if (submitBtn.tagName === 'INPUT') {
+                    submitBtn.value = submitBtn.dataset.originalText || '가입 신청';
+                } else {
+                    submitBtn.innerText = submitBtn.dataset.originalText || '가입 신청';
+                }
+
+                delete submitBtn.dataset.originalText;
+            }
+
+            return;
+        }
+
+        notifyLimited('점주 회원가입 신청이 완료되었습니다. 로그인 후 승인 상태를 확인해주세요.', 'success', 'owner-signup-success');
+
+        setTimeout(function () {
+            window.location.href = '/api/view/login';
+        }, 900);
+
+    } catch (e) {
+        notifyLimited('점주 회원가입 중 오류가 발생했습니다.', 'error', 'owner-signup-fetch-error');
+        ownerSignupSubmitting = false;
+
+        if (submitBtn) {
+            submitBtn.disabled = false;
+
+            if (submitBtn.tagName === 'INPUT') {
+                submitBtn.value = submitBtn.dataset.originalText || '가입 신청';
+            } else {
+                submitBtn.innerText = submitBtn.dataset.originalText || '가입 신청';
+            }
+
+            delete submitBtn.dataset.originalText;
+        }
+    }
 }

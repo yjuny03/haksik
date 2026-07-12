@@ -1,12 +1,44 @@
 // login.js
 
-const loginInputWarningState = {};
+var loginInputWarningTimers = {};
+var loginInputWarningLastShownAt = {};
+var loginWarningCooldownState = {};
+var loginSubmitting = false;
+
+var LOGIN_INPUT_WARNING_DELAY = 600;
+var LOGIN_INPUT_WARNING_COOLDOWN = 1800;
+var LOGIN_WARNING_COOLDOWN = 1200;
 
 document.addEventListener('DOMContentLoaded', function () {
     setupLoginInputRules();
     setupLoginSubmitValidation();
     showLoginError();
 });
+
+function bindLoginEventOnce(element, eventName, bindKey, handler) {
+    if (!element) {
+        return;
+    }
+
+    if (element.dataset[bindKey] === 'true') {
+        return;
+    }
+
+    element.dataset[bindKey] = 'true';
+    element.addEventListener(eventName, handler);
+}
+
+function showLoginWarningLimited(message, key) {
+    var warningKey = key || message;
+    var now = Date.now();
+
+    if (loginWarningCooldownState[warningKey] && now - loginWarningCooldownState[warningKey] < LOGIN_WARNING_COOLDOWN) {
+        return;
+    }
+
+    loginWarningCooldownState[warningKey] = now;
+    showLoginWarning(message);
+}
 
 // 로그인 입력값 안내 설정
 function setupLoginInputRules() {
@@ -26,11 +58,17 @@ function setupLoginInputRules() {
 
 // 입력값은 건드리지 않고 조건 위반 시 안내만 띄움
 function addLoginInputWarning(id, options) {
-    const input = document.getElementById(id);
+    var input = document.getElementById(id);
 
     if (!input) {
         return;
     }
+
+    if (input.dataset.loginWarningBound === 'true') {
+        return;
+    }
+
+    input.dataset.loginWarningBound = 'true';
 
     input.addEventListener('input', function () {
         checkLoginInputWarning(input, id, options);
@@ -41,8 +79,8 @@ function addLoginInputWarning(id, options) {
     });
 }
 
-function checkLoginInputWarning(input, id, options, forceShow = false) {
-    const value = input.value;
+function checkLoginInputWarning(input, id, options, forceShow) {
+    var value = input.value;
 
     if (!value) {
         clearLoginInputWarning(id);
@@ -51,34 +89,71 @@ function checkLoginInputWarning(input, id, options, forceShow = false) {
     }
 
     if (options.maxLength && value.length > options.maxLength) {
-        showLoginInputWarningOnce(id, 'length', options.message, forceShow);
+        showLoginInputWarningOnce(id, 'length', options.message, forceShow === true);
         return;
     }
 
     if (options.pattern && !options.pattern.test(value)) {
-        showLoginInputWarningOnce(id, 'pattern', options.message, forceShow);
+        showLoginInputWarningOnce(id, 'pattern', options.message, forceShow === true);
         return;
     }
 
     clearLoginInputWarning(id);
 }
 
-// 같은 입력창에서 안내가 계속 뜨는 것 방지
-function showLoginInputWarningOnce(id, type, message, forceShow = false) {
-    const key = id + ':' + type;
+// 빠르게 입력 중이면 기다렸다가 한 번만 보여주고, 계속 틀리면 일정 시간 뒤 다시 보여줌
+function showLoginInputWarningOnce(id, type, message, forceShow) {
+    var key = id + ':' + type;
+    var input = document.getElementById(id);
 
-    if (!forceShow && loginInputWarningState[key]) {
+    if (!input) {
         return;
     }
 
-    loginInputWarningState[key] = true;
-    showLoginWarning(message);
+    var currentValue = input.value;
+    var delay = forceShow ? 0 : LOGIN_INPUT_WARNING_DELAY;
+
+    clearLoginInputWarningTimers(id);
+
+    loginInputWarningTimers[key] = setTimeout(function () {
+        var latestInput = document.getElementById(id);
+
+        if (!latestInput) {
+            return;
+        }
+
+        var latestValue = latestInput.value;
+
+        if (latestValue !== currentValue) {
+            return;
+        }
+
+        var now = Date.now();
+
+        if (loginInputWarningLastShownAt[key] && now - loginInputWarningLastShownAt[key] < LOGIN_INPUT_WARNING_COOLDOWN) {
+            return;
+        }
+
+        loginInputWarningLastShownAt[key] = now;
+        showLoginWarningLimited(message, key);
+    }, delay);
+}
+
+function clearLoginInputWarningTimers(id) {
+    Object.keys(loginInputWarningTimers).forEach(function (key) {
+        if (key.startsWith(id + ':')) {
+            clearTimeout(loginInputWarningTimers[key]);
+            delete loginInputWarningTimers[key];
+        }
+    });
 }
 
 function clearLoginInputWarning(id) {
-    Object.keys(loginInputWarningState).forEach(function (key) {
+    clearLoginInputWarningTimers(id);
+
+    Object.keys(loginInputWarningLastShownAt).forEach(function (key) {
         if (key.startsWith(id + ':')) {
-            delete loginInputWarningState[key];
+            delete loginInputWarningLastShownAt[key];
         }
     });
 }
@@ -95,15 +170,20 @@ function showLoginWarning(message) {
 
 // 로그인 submit 전 최소 검증
 function setupLoginSubmitValidation() {
-    const loginForm = document.getElementById('loginForm');
+    var loginForm = document.getElementById('loginForm');
 
     if (!loginForm) {
         return;
     }
 
-    loginForm.addEventListener('submit', function (event) {
-        const loginId = document.getElementById('loginId').value.trim();
-        const password = document.getElementById('password').value;
+    bindLoginEventOnce(loginForm, 'submit', 'loginSubmitBound', function (event) {
+        if (loginSubmitting) {
+            event.preventDefault();
+            return;
+        }
+
+        var loginId = document.getElementById('loginId').value.trim();
+        var password = document.getElementById('password').value;
 
         if (!loginId || !password) {
             event.preventDefault();
@@ -124,16 +204,23 @@ function setupLoginSubmitValidation() {
         }
 
         clearInlineLoginError();
+        loginSubmitting = true;
+
+        var submitBtn = loginForm.querySelector('button[type="submit"], input[type="submit"]');
+
+        if (submitBtn) {
+            submitBtn.disabled = true;
+        }
     });
 }
 
 // 로그인 실패 메시지 표시
 function showLoginError() {
-    const params = new URLSearchParams(window.location.search);
+    var params = new URLSearchParams(window.location.search);
 
-    const errorMessage = params.get('error');
-    const ownerRejected = params.get('ownerRejected');
-    const rejectedReason = params.get('reason');
+    var errorMessage = params.get('error');
+    var ownerRejected = params.get('ownerRejected');
+    var rejectedReason = params.get('reason');
 
     if (ownerRejected === 'true') {
         showInlineLoginError(rejectedReason || '점주 가입 신청이 반려되었습니다.');
@@ -149,7 +236,7 @@ function showLoginError() {
 
 // 화면 안쪽 에러 표시
 function showInlineLoginError(message) {
-    const loginError = document.getElementById('loginError');
+    var loginError = document.getElementById('loginError');
 
     if (!loginError) {
         return;
@@ -161,7 +248,7 @@ function showInlineLoginError(message) {
 
 // 화면 안쪽 에러 제거
 function clearInlineLoginError() {
-    const loginError = document.getElementById('loginError');
+    var loginError = document.getElementById('loginError');
 
     if (!loginError) {
         return;

@@ -39,11 +39,11 @@ public class Post extends BaseEntity {
     @Column(name = "category", nullable = false, length = 20)
     private PostCategory category;
 
-    @Column(name = "title", nullable = false, length = 200)
+    @Column(name = "title", nullable = false, length = 100)
     private String title;
 
     @Lob
-    @Column(name = "content", nullable = false)
+    @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
 
     @Column(name = "anonymous_yn", nullable = false, length = 1)

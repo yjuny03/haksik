@@ -1,16 +1,46 @@
 // reset-pw.js
 
-const resetPwInputWarningState = {};
+var resetPwInputWarningTimers = {};
+var resetPwInputWarningLastShownAt = {};
+var resetPwToastCooldownState = {};
+var resetPwSubmitting = false;
+
+var RESET_PW_INPUT_WARNING_DELAY = 600;
+var RESET_PW_INPUT_WARNING_COOLDOWN = 1800;
+var RESET_PW_TOAST_COOLDOWN = 1200;
 
 document.addEventListener('DOMContentLoaded', function () {
     setupResetPwInputRules();
 
-    const resetPwForm = document.getElementById('resetPwForm');
+    var resetPwForm = document.getElementById('resetPwForm');
 
-    if (resetPwForm) {
-        resetPwForm.addEventListener('submit', submitResetPw);
-    }
+    bindResetPwEventOnce(resetPwForm, 'submit', 'resetPwSubmitBound', submitResetPw);
 });
+
+function bindResetPwEventOnce(element, eventName, bindKey, handler) {
+    if (!element) {
+        return;
+    }
+
+    if (element.dataset[bindKey] === 'true') {
+        return;
+    }
+
+    element.dataset[bindKey] = 'true';
+    element.addEventListener(eventName, handler);
+}
+
+function showResetPwToastLimited(message, type, key) {
+    var toastKey = key || message;
+    var now = Date.now();
+
+    if (resetPwToastCooldownState[toastKey] && now - resetPwToastCooldownState[toastKey] < RESET_PW_TOAST_COOLDOWN) {
+        return;
+    }
+
+    resetPwToastCooldownState[toastKey] = now;
+    showToast(message, type);
+}
 
 // 비밀번호 재설정 입력값 안내 설정
 function setupResetPwInputRules() {
@@ -29,11 +59,17 @@ function setupResetPwInputRules() {
 
 // 입력값은 건드리지 않고 조건 위반 시 안내만 띄움
 function addResetPwInputWarning(id, options) {
-    const input = document.getElementById(id);
+    var input = document.getElementById(id);
 
     if (!input) {
         return;
     }
+
+    if (input.dataset.resetPwWarningBound === 'true') {
+        return;
+    }
+
+    input.dataset.resetPwWarningBound = 'true';
 
     input.addEventListener('input', function () {
         checkResetPwInputWarning(input, id, options);
@@ -44,8 +80,8 @@ function addResetPwInputWarning(id, options) {
     });
 }
 
-function checkResetPwInputWarning(input, id, options, forceShow = false) {
-    const value = input.value;
+function checkResetPwInputWarning(input, id, options, forceShow) {
+    var value = input.value;
 
     if (!value) {
         clearResetPwInputWarning(id);
@@ -53,29 +89,66 @@ function checkResetPwInputWarning(input, id, options, forceShow = false) {
     }
 
     if (options.maxLength && value.length > options.maxLength) {
-        showResetPwInputWarningOnce(id, 'length', options.message, forceShow);
+        showResetPwInputWarningOnce(id, 'length', options.message, forceShow === true);
         return;
     }
 
     clearResetPwInputWarning(id);
 }
 
-// 같은 입력창에서 toast가 계속 뜨는 것 방지
-function showResetPwInputWarningOnce(id, type, message, forceShow = false) {
-    const key = id + ':' + type;
+// 빠르게 입력 중이면 기다렸다가 한 번만 보여주고, 계속 틀리면 일정 시간 뒤 다시 보여줌
+function showResetPwInputWarningOnce(id, type, message, forceShow) {
+    var key = id + ':' + type;
+    var input = document.getElementById(id);
 
-    if (!forceShow && resetPwInputWarningState[key]) {
+    if (!input) {
         return;
     }
 
-    resetPwInputWarningState[key] = true;
-    showToast(message, 'warning');
+    var currentValue = input.value;
+    var delay = forceShow ? 0 : RESET_PW_INPUT_WARNING_DELAY;
+
+    clearResetPwInputWarningTimers(id);
+
+    resetPwInputWarningTimers[key] = setTimeout(function () {
+        var latestInput = document.getElementById(id);
+
+        if (!latestInput) {
+            return;
+        }
+
+        var latestValue = latestInput.value;
+
+        if (latestValue !== currentValue) {
+            return;
+        }
+
+        var now = Date.now();
+
+        if (resetPwInputWarningLastShownAt[key] && now - resetPwInputWarningLastShownAt[key] < RESET_PW_INPUT_WARNING_COOLDOWN) {
+            return;
+        }
+
+        resetPwInputWarningLastShownAt[key] = now;
+        showResetPwToastLimited(message, 'warning', key);
+    }, delay);
+}
+
+function clearResetPwInputWarningTimers(id) {
+    Object.keys(resetPwInputWarningTimers).forEach(function (key) {
+        if (key.startsWith(id + ':')) {
+            clearTimeout(resetPwInputWarningTimers[key]);
+            delete resetPwInputWarningTimers[key];
+        }
+    });
 }
 
 function clearResetPwInputWarning(id) {
-    Object.keys(resetPwInputWarningState).forEach(function (key) {
+    clearResetPwInputWarningTimers(id);
+
+    Object.keys(resetPwInputWarningLastShownAt).forEach(function (key) {
         if (key.startsWith(id + ':')) {
-            delete resetPwInputWarningState[key];
+            delete resetPwInputWarningLastShownAt[key];
         }
     });
 }
@@ -104,19 +177,23 @@ function getErrorMessage(result, fallback) {
 async function submitResetPw(event) {
     event.preventDefault();
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const email = urlParams.get('email');
+    if (resetPwSubmitting) {
+        return;
+    }
 
-    const newPassword = document.getElementById('newPassword').value;
-    const confirmPassword = document.getElementById('confirmPassword').value;
-    const resetPwError = document.getElementById('resetPwError');
+    var urlParams = new URLSearchParams(window.location.search);
+    var email = urlParams.get('email');
+
+    var newPassword = document.getElementById('newPassword').value;
+    var confirmPassword = document.getElementById('confirmPassword').value;
+    var resetPwError = document.getElementById('resetPwError');
 
     if (resetPwError) {
         resetPwError.classList.remove('visible');
     }
 
     if (!email) {
-        showToast('비밀번호 재설정 이메일 정보가 없습니다. 다시 인증해주세요.', 'error');
+        showResetPwToastLimited('비밀번호 재설정 이메일 정보가 없습니다. 다시 인증해주세요.', 'error', 'reset-pw-email-missing');
 
         setTimeout(function () {
             window.location.href = '/api/view/find-pw';
@@ -126,17 +203,17 @@ async function submitResetPw(event) {
     }
 
     if (!newPassword || !confirmPassword) {
-        showToast('비밀번호를 모두 입력해주세요.', 'error');
+        showResetPwToastLimited('비밀번호를 모두 입력해주세요.', 'error', 'reset-pw-required');
         return;
     }
 
     if (newPassword.length < 8 || newPassword.length > 20) {
-        showToast('비밀번호는 8자 이상, 20자 이내로 입력해주세요.', 'warning');
+        showResetPwToastLimited('비밀번호는 8자 이상, 20자 이내로 입력해주세요.', 'warning', 'reset-pw-new-password-invalid');
         return;
     }
 
     if (confirmPassword.length > 20) {
-        showToast('비밀번호 확인은 20자 이내로 입력해주세요.', 'warning');
+        showResetPwToastLimited('비밀번호 확인은 20자 이내로 입력해주세요.', 'warning', 'reset-pw-confirm-password-invalid');
         return;
     }
 
@@ -145,31 +222,54 @@ async function submitResetPw(event) {
             resetPwError.classList.add('visible');
         }
 
-        showToast('비밀번호가 일치하지 않습니다.', 'error');
+        showResetPwToastLimited('비밀번호가 일치하지 않습니다.', 'error', 'reset-pw-password-mismatch');
         return;
     }
 
-    const response = await fetch('/api/members/find-pw/reset', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            email: email,
-            newPassword: newPassword
-        })
-    });
+    var submitBtn = document.querySelector('#resetPwForm button[type="submit"], #resetPwForm input[type="submit"]');
+    resetPwSubmitting = true;
 
-    const result = await safeJson(response);
-
-    if (!response.ok || !result || result.success === false) {
-        showToast(getErrorMessage(result, '비밀번호 변경에 실패했습니다. 다시 시도해주세요.'), 'error');
-        return;
+    if (submitBtn) {
+        submitBtn.disabled = true;
     }
 
-    showToast('비밀번호가 변경되었습니다. 다시 로그인해주세요.', 'success');
+    try {
+        var response = await fetch('/api/members/find-pw/reset', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                email: email,
+                newPassword: newPassword
+            })
+        });
 
-    setTimeout(function () {
-        window.location.href = '/api/view/login';
-    }, 900);
+        var result = await safeJson(response);
+
+        if (!response.ok || !result || result.success === false) {
+            showResetPwToastLimited(getErrorMessage(result, '비밀번호 변경에 실패했습니다. 다시 시도해주세요.'), 'error', 'reset-pw-submit-error');
+            resetPwSubmitting = false;
+
+            if (submitBtn) {
+                submitBtn.disabled = false;
+            }
+
+            return;
+        }
+
+        showResetPwToastLimited('비밀번호가 변경되었습니다. 다시 로그인해주세요.', 'success', 'reset-pw-submit-success');
+
+        setTimeout(function () {
+            window.location.href = '/api/view/login';
+        }, 900);
+
+    } catch (e) {
+        showResetPwToastLimited('비밀번호 변경 중 오류가 발생했습니다.', 'error', 'reset-pw-submit-fetch-error');
+        resetPwSubmitting = false;
+
+        if (submitBtn) {
+            submitBtn.disabled = false;
+        }
+    }
 }
