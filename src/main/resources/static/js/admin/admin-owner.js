@@ -3,6 +3,10 @@ const ownerPageSize = 10;
 
 // 점주 신청 목록 초기 조회
 document.addEventListener("DOMContentLoaded", () => {
+    const status = new URLSearchParams(window.location.search).get("status");
+    if (status && document.querySelector(`#statusFilter option[value="${status}"]`)) {
+        document.getElementById("statusFilter").value = status;
+    }
     fetchOwners(0);
 });
 

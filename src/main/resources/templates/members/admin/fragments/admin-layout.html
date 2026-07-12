@@ -47,16 +47,34 @@
 <main class="admin-main">
     <header class="admin-header">
         <h2 class="admin-title" th:text="${headerTitle}">관리자 페이지</h2>
-        <div class="admin-profile">최고관리자 (admin)</div>
-        <form th:action="@{/api/auth/logout}" method="post">
-            <button type="submit" class="admin-logout-btn">로그아웃</button>
-        </form>
+        <div class="admin-profile-actions">
+            <div class="admin-notification-wrap">
+                <button id="adminNotificationButton" class="admin-notification-button" type="button" aria-label="관리자 알림">
+                    🔔<span id="adminNotificationBadge" class="admin-notification-badge" hidden>0</span>
+                </button>
+                <div id="adminNotificationPanel" class="admin-notification-panel" hidden>
+                    <div class="admin-notification-head">
+                        <span>관리자 작업 알림</span>
+                        <button type="button" onclick="readAllAdminNotifications(event)">모두 읽음</button>
+                    </div>
+                    <div id="adminNotificationList" class="admin-notification-list">
+                        <div class="admin-notification-empty">알림을 불러오는 중입니다.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="admin-profile">최고관리자 (admin)</div>
+            <form th:action="@{/api/auth/logout}" method="post">
+                <button type="submit" class="admin-logout-btn">로그아웃</button>
+            </form>
+        </div>
     </header>
 
     <section class="admin-content">
         <th:block th:replace="${content}"></th:block>
     </section>
 </main>
+
+<script th:src="@{/js/admin/admin-notifications.js}"></script>
 
 </body>
 </html>

@@ -442,7 +442,15 @@
         <div class="place-map-bottom appointment-map-bottom">
           <div class="place-map-action-row map-only-action-row">
             <button type="button" id="placeAddButton" class="place-add-button" onclick="startAddCustomPlaceMode()">장소 추가</button>
+            <button type="button" id="aiRestaurantRecommendButton" class="ai-restaurant-button" onclick="loadAiRestaurantRecommendations()">AI 식당 추천</button>
             <button type="button" class="place-result-button" onclick="closeAppointmentMapScreen()">완료</button>
+          </div>
+
+          <div id="aiRestaurantRecommendationPanel" class="ai-restaurant-panel hidden">
+            <div class="appointment-section-title">AI 식당 추천</div>
+            <div id="aiRestaurantRecommendationList" class="ai-restaurant-list">
+              <!-- JS로 추천 카드 표시 -->
+            </div>
           </div>
 
           <div class="form-empty-text small-guide">

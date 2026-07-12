@@ -699,10 +699,18 @@ async function sendMessage() {
     body.scrollTop = body.scrollHeight;
 
     try {
+        const location = await getChatbotCurrentLocation();
+        const payload = { message: text };
+
+        if (location) {
+            payload.lat = String(location.lat);
+            payload.lng = String(location.lng);
+        }
+
         const response = await fetch('/api/chatbot/ask', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: text })
+            body: JSON.stringify(payload)
         });
 
         const data = await response.json();
@@ -723,4 +731,30 @@ async function sendMessage() {
         errorMsg.innerText = '서버랑 연결이 끊어졌습니다. 잠시만 기다려주세요.';
         body.appendChild(errorMsg);
     }
+}
+
+function getChatbotCurrentLocation() {
+    return new Promise(function (resolve) {
+        if (!navigator.geolocation) {
+            resolve(null);
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            function (position) {
+                resolve({
+                    lat: position.coords.latitude,
+                    lng: position.coords.longitude
+                });
+            },
+            function () {
+                resolve(null);
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 2500,
+                maximumAge: 60000
+            }
+        );
+    });
 }

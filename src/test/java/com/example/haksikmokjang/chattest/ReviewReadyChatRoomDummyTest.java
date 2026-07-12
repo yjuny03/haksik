@@ -10,7 +10,9 @@ import com.example.haksikmokjang.chat.chatroom.domain.ChatRoom;
 import com.example.haksikmokjang.chat.chatroom.dto.ChatRoomResponse;
 import com.example.haksikmokjang.chat.chatroom.repository.ChatRoomRepository;
 import com.example.haksikmokjang.chat.chatroom.service.ChatRoomCreateService;
+import com.example.haksikmokjang.member.core.domain.AccountStatus;
 import com.example.haksikmokjang.member.core.domain.Member;
+import com.example.haksikmokjang.member.core.domain.MemberRole;
 import com.example.haksikmokjang.member.core.repository.MemberRepository;
 import com.example.haksikmokjang.ownerpage.store.domain.BusinessStatus;
 import com.example.haksikmokjang.ownerpage.store.domain.Reservation;
@@ -22,6 +24,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.annotation.Rollback;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,15 +49,17 @@ class ReviewReadyChatRoomDummyTest {
     private StoreRepository storeRepository;
     @Autowired
     private MemberRepository memberRepository;
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
     @Test
     @Transactional
     @Rollback(false)
-    @DisplayName("pageuser01이 ownerpage01 식당 리뷰를 쓸 수 있는 종료 채팅방 3종 생성")
+    @DisplayName("user1이 owner1 식당 리뷰를 쓸 수 있는 종료 채팅방 3종 생성")
     void createClosedChatRoomsReadyForOwner01StoreReview() {
-        Member user01 = getMemberByLoginId("pageuser01");
-        Member user02 = getMemberByLoginId("pageuser02");
-        Member owner01 = getMemberByLoginId("ownerpage01");
+        Member user01 = getOrCreateMember("user1", MemberRole.USER, 1);
+        Member user02 = getOrCreateMember("user2", MemberRole.USER, 2);
+        Member owner01 = getOrCreateMember("owner1", MemberRole.OWNER, 1);
 
         Store owner01Store = getOrCreateOwner01Store(owner01);
 
@@ -64,7 +69,7 @@ class ReviewReadyChatRoomDummyTest {
         );
 
         ChatRoomResponse groupDateRoom = chatRoomCreateService.createGroupDateChatRoom(
-                "pageuser01 pageuser02 과팅 식당 리뷰 테스트방",
+                "user1 user2 과팅 식당 리뷰 테스트방",
                 List.of(user01.getMemberId(), user02.getMemberId())
         );
 
@@ -98,7 +103,7 @@ class ReviewReadyChatRoomDummyTest {
         assertNotNull(groupDateReservationId);
         assertNotNull(blindDateReservationId);
 
-        System.out.println("✅ ownerpage01 식당 리뷰 가능한 종료 채팅방 3종 생성 완료");
+        System.out.println("✅ owner1 식당 리뷰 가능한 종료 채팅방 3종 생성 완료");
         System.out.println("리뷰 작성 유저 = " + user01.getLoginId() + ", memberId = " + user01.getMemberId());
         System.out.println("상대 유저 = " + user02.getLoginId() + ", memberId = " + user02.getMemberId());
         System.out.println("점주 = " + owner01.getLoginId() + ", memberId = " + owner01.getMemberId());
@@ -109,7 +114,7 @@ class ReviewReadyChatRoomDummyTest {
         System.out.println("과팅 roomId = " + groupDateRoom.getChatRoomId() + ", reservationId = " + groupDateReservationId);
         System.out.println("소개팅 roomId = " + blindDateRoom.getChatRoomId() + ", reservationId = " + blindDateReservationId);
 
-        System.out.println("➡ pageuser01로 로그인 후 리뷰쓰기 페이지에서 식당 리뷰 3개가 떠야 합니다.");
+        System.out.println("➡ user1로 로그인 후 리뷰쓰기 페이지에서 식당 리뷰 3개가 떠야 합니다.");
     }
 
     private Long makeStoreReviewReadyChatRoom(
@@ -163,7 +168,7 @@ class ReviewReadyChatRoomDummyTest {
     private Store getOrCreateOwner01Store(Member owner01) {
         return storeRepository.findAll().stream()
                 .filter(store -> store.getMember() != null)
-                .filter(store -> "ownerpage01".equals(store.getMember().getLoginId()))
+                .filter(store -> "owner1".equals(store.getMember().getLoginId()))
                 .findFirst()
                 .orElseGet(() -> storeRepository.save(
                         Store.builder()
@@ -180,8 +185,17 @@ class ReviewReadyChatRoomDummyTest {
                 ));
     }
 
-    private Member getMemberByLoginId(String loginId) {
+    private Member getOrCreateMember(String loginId, MemberRole role, int index) {
         return memberRepository.findByLoginId(loginId)
-                .orElseThrow(() -> new RuntimeException(loginId + " 계정이 없습니다."));
+                .orElseGet(() -> memberRepository.save(
+                        Member.builder()
+                                .loginId(loginId)
+                                .passwordHash(passwordEncoder.encode("1234"))
+                                .email(loginId + "@test.com")
+                                .phone("010-9200-" + String.format("%04d", index))
+                                .role(role)
+                                .accountStatus(AccountStatus.ACTIVE)
+                                .build()
+                ));
     }
 }

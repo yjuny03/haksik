@@ -669,6 +669,7 @@ function closePlaceFormMapModal() {
 
     closeAppointmentMapScreen();
     closeTimeOptionPanel();
+    clearAiRestaurantRecommendations();
 
     currentPlaceFormId = null;
     currentPlaceFormDetail = null;
@@ -1101,6 +1102,282 @@ function loadNearbyStoresForPlaceMap(lat, lng) {
         });
 }
 
+// 채팅방 참여자 선호도 기반 AI 식당 추천 조회
+function loadAiRestaurantRecommendations() {
+    if (currentPlaceFormDetail && isFormClosed(currentPlaceFormDetail)) {
+        showToast("종료된 약속 투표입니다.", "error");
+        return;
+    }
+
+    const chatRoomId = getChatRoomId();
+    const center = getCurrentPlaceMapCenter();
+    const panel = document.getElementById("aiRestaurantRecommendationPanel");
+    const list = document.getElementById("aiRestaurantRecommendationList");
+    const button = document.getElementById("aiRestaurantRecommendButton");
+
+    if (!chatRoomId || !currentPlaceFormId) {
+        showToast("채팅방 또는 약속 투표 정보를 찾을 수 없습니다.", "error");
+        return;
+    }
+
+    if (!center) {
+        showToast("현재 위치가 필요합니다. 지도를 먼저 불러와 주세요.", "error");
+        return;
+    }
+
+    if (panel) {
+        panel.classList.remove("hidden");
+    }
+
+    if (list) {
+        list.innerHTML = `<div class="form-empty-text">AI 추천을 불러오는 중입니다.</div>`;
+    }
+
+    if (button) {
+        button.disabled = true;
+    }
+
+    const url = "/api/chat/rooms/" + encodeURIComponent(chatRoomId)
+        + "/ai/restaurant-recommendations?lat=" + encodeURIComponent(center.lat)
+        + "&lng=" + encodeURIComponent(center.lng)
+        + "&radiusKm=3"
+        + "&limit=3"
+        + "&context=CHAT_PLACE";
+
+    fetch(url)
+        .then(function (response) {
+            if (!response.ok) {
+                throw new Error();
+            }
+
+            return response.json();
+        })
+        .then(function (response) {
+            renderAiRestaurantRecommendations(response);
+        })
+        .catch(function () {
+            if (list) {
+                list.innerHTML = `<div class="form-empty-text">현재 위치가 필요하거나 추천 후보가 부족합니다.</div>`;
+            }
+        })
+        .finally(function () {
+            if (button) {
+                button.disabled = false;
+            }
+        });
+}
+
+// 현재 지도 중심 좌표
+function getCurrentPlaceMapCenter() {
+    if (!placeVoteMap || typeof placeVoteMap.getCenter !== "function") {
+        return null;
+    }
+
+    const center = placeVoteMap.getCenter();
+    if (!center || typeof center.lat !== "function" || typeof center.lng !== "function") {
+        return null;
+    }
+
+    const lat = center.lat();
+    const lng = center.lng();
+
+    if (!isValidCoordinate(lat, lng)) {
+        return null;
+    }
+
+    return {
+        lat: Number(lat),
+        lng: Number(lng)
+    };
+}
+
+// AI 식당 추천 카드 렌더링
+function renderAiRestaurantRecommendations(response) {
+    const panel = document.getElementById("aiRestaurantRecommendationPanel");
+    const list = document.getElementById("aiRestaurantRecommendationList");
+
+    if (!list) {
+        return;
+    }
+
+    const recommendations = response && Array.isArray(response.recommendations)
+        ? response.recommendations
+        : [];
+
+    if (panel) {
+        panel.classList.remove("hidden");
+    }
+
+    if (recommendations.length === 0) {
+        list.innerHTML = `<div class="form-empty-text">반경 안에 추천 가능한 판매 중 메뉴가 있는 식당이 없습니다.</div>`;
+        return;
+    }
+
+    const preferenceText = createAiPreferenceText(response);
+
+    list.innerHTML = recommendations.map(function (item) {
+        const menu = item.recommendedMenu || {};
+        const menuName = menu.name || "판매 중 메뉴";
+        const distanceText = item.distanceMeters ? formatDistanceMeters(item.distanceMeters) : (item.distanceText || "");
+        const ratingText = Number(item.reviewCount || 0) > 0
+            ? "평점 " + Number(item.averageRating || 0).toFixed(1) + " · 리뷰 " + Number(item.reviewCount || 0) + "개"
+            : "리뷰 정보 적음";
+        const reason = item.reason || "참여자 선호도와 거리, 리뷰 정보를 기준으로 추천했습니다.";
+
+        return `
+            <div class="ai-restaurant-card">
+                <div class="ai-restaurant-top">
+                    <div>
+                        <div class="ai-restaurant-name">${escapeHtml(item.storeName || "식당")}</div>
+                        <div class="ai-restaurant-meta">${escapeHtml(menuName)} · ${escapeHtml(distanceText)} · ${escapeHtml(ratingText)}</div>
+                    </div>
+                    <div class="ai-restaurant-badge">${escapeHtml(item.category || "추천")}</div>
+                </div>
+                <div class="ai-restaurant-meta">${escapeHtml(preferenceText)}</div>
+                <div class="ai-restaurant-reason">${escapeHtml(reason)}</div>
+                <button type="button" onclick="addAiRecommendationAsPlace(${Number(item.storeId)})">
+                    장소 후보로 추가
+                </button>
+            </div>
+        `;
+    }).join("");
+
+    recommendations.forEach(function (item) {
+        if (item && item.storeId) {
+            placeStoreCache[String(item.storeId)] = {
+                storeId: item.storeId,
+                name: item.storeName,
+                address: item.address,
+                category: item.category,
+                latitude: item.latitude,
+                longitude: item.longitude,
+                businessStatus: item.businessStatus
+            };
+        }
+    });
+}
+
+// 추천 선호도 문구 생성
+function createAiPreferenceText(response) {
+    const counts = response && response.chatPreferredFoodCategoryCounts
+        ? response.chatPreferredFoodCategoryCounts
+        : {};
+    const entries = Object.keys(counts).map(function (category) {
+        return category + " " + counts[category] + "명";
+    });
+
+    if (entries.length === 0) {
+        return "참여자 선호 음식 미설정 인원은 제외하고 추천했습니다.";
+    }
+
+    const majority = response.majorityPreferredFoodCategory
+        ? " · 다수 선호 " + response.majorityPreferredFoodCategory
+        : "";
+
+    return "참여자 선호 " + entries.join(", ") + majority;
+}
+
+// AI 추천 식당을 장소 후보로 추가
+function addAiRecommendationAsPlace(storeId) {
+    if (!storeId) {
+        showToast("추천 식당 정보를 찾을 수 없습니다.", "error");
+        return;
+    }
+
+    const store = placeStoreCache[String(storeId)];
+
+    if (!store) {
+        showToast("추천 식당 정보를 찾을 수 없습니다.", "error");
+        return;
+    }
+
+    addStoreOptionFromStore(store, false);
+}
+
+// 식당 후보 추가 공통 처리
+function addStoreOptionFromStore(store, voteAfterAdd) {
+    if (currentPlaceFormDetail && isFormClosed(currentPlaceFormDetail)) {
+        showToast("종료된 약속 투표입니다.", "error");
+        return;
+    }
+
+    if (!store || !currentPlaceFormId) {
+        showToast("가게 정보를 찾을 수 없습니다.", "error");
+        return;
+    }
+
+    const existingOption = getExistingStoreOption(store.storeId);
+
+    if (existingOption && existingOption.optionId) {
+        if (voteAfterAdd) {
+            submitPlaceVoteOption(existingOption.optionId);
+        } else {
+            showToast("이미 장소 후보에 추가된 식당입니다.", "info");
+        }
+        return;
+    }
+
+    fetch("/api/chat/forms/" + currentPlaceFormId + "/options", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            optionType: "PLACE",
+            placeSource: "STORE",
+            storeId: Number(store.storeId),
+            placeName: store.name,
+            optionText: store.name,
+            address: store.address,
+            latitude: Number(store.latitude),
+            longitude: Number(store.longitude),
+            mapUrl: ""
+        })
+    })
+        .then(function (response) {
+            if (!response.ok) {
+                throw new Error();
+            }
+
+            return response.json();
+        })
+        .then(function (option) {
+            if (voteAfterAdd && option && option.optionId) {
+                submitPlaceVoteOption(option.optionId);
+                return;
+            }
+
+            showToast("장소 후보에 추가되었습니다.", "success");
+            reloadPlaceFormDetail();
+        })
+        .catch(function () {
+            showToast("식당 후보 추가에 실패했습니다.", "error");
+        });
+}
+
+// AI 추천 목록 초기화
+function clearAiRestaurantRecommendations() {
+    const panel = document.getElementById("aiRestaurantRecommendationPanel");
+    const list = document.getElementById("aiRestaurantRecommendationList");
+
+    if (panel) {
+        panel.classList.add("hidden");
+    }
+
+    if (list) {
+        list.innerHTML = "";
+    }
+}
+
+// 거리 표시
+function formatDistanceMeters(distanceMeters) {
+    const distance = Number(distanceMeters || 0);
+    if (distance >= 1000) {
+        return (distance / 1000).toFixed(1) + "km";
+    }
+    return Math.round(distance) + "m";
+}
+
 // 점주 가게 마커 렌더링
 function renderStoreMarkers(stores) {
     clearStoreMarkers();
@@ -1204,60 +1481,14 @@ function openStoreInfo(marker, store) {
 
 // 점주 가게 후보 추가 후 바로 투표
 function addStoreOptionAndVoteById(storeId) {
-    if (currentPlaceFormDetail && isFormClosed(currentPlaceFormDetail)) {
-        showToast("종료된 약속 투표입니다.", "error");
-        return;
-    }
-
     const store = placeStoreCache[String(storeId)];
 
-    if (!store || !currentPlaceFormId) {
+    if (!store) {
         showToast("가게 정보를 찾을 수 없습니다.", "error");
         return;
     }
 
-    const existingOption = getExistingStoreOption(storeId);
-
-    if (existingOption && existingOption.optionId) {
-        submitPlaceVoteOption(existingOption.optionId);
-        return;
-    }
-
-    fetch("/api/chat/forms/" + currentPlaceFormId + "/options", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            optionType: "PLACE",
-            placeSource: "STORE",
-            storeId: Number(store.storeId),
-            placeName: store.name,
-            optionText: store.name,
-            address: store.address,
-            latitude: Number(store.latitude),
-            longitude: Number(store.longitude),
-            mapUrl: ""
-        })
-    })
-        .then(function (response) {
-            if (!response.ok) {
-                throw new Error();
-            }
-
-            return response.json();
-        })
-        .then(function (option) {
-            if (option && option.optionId) {
-                submitPlaceVoteOption(option.optionId);
-                return;
-            }
-
-            voteStoreAfterReload(storeId);
-        })
-        .catch(function () {
-            showToast("식당 투표에 실패했습니다.", "error");
-        });
+    addStoreOptionFromStore(store, true);
 }
 
 // 후보 추가 응답에 optionId가 없을 때 다시 조회해서 투표

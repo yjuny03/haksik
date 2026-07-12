@@ -162,12 +162,14 @@ class MatchingTestDataGeneratorTest {
 
         // 기존 계정이 있으면 재사용하되 필터 테스트 조건에 맞게 값만 보정한다.
         ReflectionTestUtils.setField(userProfile, "school", school);
-        ReflectionTestUtils.setField(userProfile, "name", "테스트유저" + index);
-        ReflectionTestUtils.setField(userProfile, "nickname", "테스트유저" + index);
-        ReflectionTestUtils.setField(userProfile, "department", "컴퓨터소프트웨어학과");
-        ReflectionTestUtils.setField(userProfile, "birthDate", createBirthDate(index));
+        userProfile.updateInfo(
+                "테스트유저" + index,
+                "컴퓨터소프트웨어학과",
+                createFoodCategory(index),
+                "테스트유저" + index,
+                createBirthDate(index)
+        );
         ReflectionTestUtils.setField(userProfile, "gender", createGender(index));
-        ReflectionTestUtils.setField(userProfile, "preferredFoodCategory", createFoodCategory(index));
         ReflectionTestUtils.setField(userProfile, "mannerTemperature", BigDecimal.valueOf(36.5));
         ReflectionTestUtils.setField(userProfile, "noShowCount", 0);
 

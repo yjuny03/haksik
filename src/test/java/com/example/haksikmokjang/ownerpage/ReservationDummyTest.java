@@ -1,8 +1,11 @@
 package com.example.haksikmokjang.ownerpage;
 
 import com.example.haksikmokjang.member.core.domain.Member;
+import com.example.haksikmokjang.member.core.domain.AccountStatus;
+import com.example.haksikmokjang.member.core.domain.MemberRole;
 import com.example.haksikmokjang.member.core.repository.MemberRepository;
 import com.example.haksikmokjang.notification.service.NotificationService;
+import com.example.haksikmokjang.ownerpage.store.domain.BusinessStatus;
 import com.example.haksikmokjang.ownerpage.store.domain.Reservation;
 import com.example.haksikmokjang.ownerpage.store.domain.ReservationStatus;
 import com.example.haksikmokjang.ownerpage.store.domain.Store;
@@ -12,6 +15,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.annotation.Rollback;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,30 +28,50 @@ class ReservationDummyTest {
     @Autowired MemberRepository memberRepository;
     @Autowired ReservationRepository reservationRepository;
     @Autowired NotificationService notificationService;
+    @Autowired PasswordEncoder passwordEncoder;
     @Test
     @Transactional
     @Rollback(false) // 🚨 팩트: 롤백을 끄고 DB에 영구적으로 때려 박습니다.
-    @DisplayName("pageuser01이 ownerpage01의 가게에 신규 예약 3건 강제 주입")
+    @DisplayName("user1이 owner1의 가게에 신규 예약 3건 강제 주입")
     void insertRequestedReservations() {
 
-        // 1. 타겟팅 1: 예약을 신청할 특정 유저(pageuser01)를 정확히 긁어옵니다.
-        Member user = memberRepository.findByLoginId("pageuser01")
-                .orElseThrow(() -> new RuntimeException("pageuser01 계정이 없습니다. DB를 확인하십시오."));
+        // 1. 타겟팅 1: 예약을 신청할 특정 유저를 없으면 만들고 있으면 재사용합니다.
+        Member user = getOrCreateMember("user1", MemberRole.USER, 1);
 
-        // 2. 타겟팅 2: 타겟 점주(ownerpage01)를 찾습니다.
-        Member owner = memberRepository.findByLoginId("ownerpage01")
-                .orElseThrow(() -> new RuntimeException("ownerpage01 계정이 없습니다. DB를 확인하십시오."));
+        // 2. 타겟팅 2: 타겟 점주를 없으면 만들고 있으면 재사용합니다.
+        Member owner = getOrCreateMember("owner1", MemberRole.OWNER, 1);
 
-        // 3. 타겟팅 3: ownerpage01이 소유한 가게를 정확히 긁어옵니다.
-        Store store = storeRepository.findAll().stream()
-                .filter(s -> s.getMember().getMemberId().equals(owner.getMemberId()))
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("ownerpage01이 소유한 가게가 없습니다. 가게 더미 데이터를 먼저 주입하십시오."));
+        // 3. 타겟팅 3: owner1이 소유한 가게를 없으면 만들고 있으면 재사용합니다.
+        Store store = storeRepository.findByMember_LoginId(owner.getLoginId())
+                .orElseGet(() -> storeRepository.save(
+                        Store.builder()
+                                .member(owner)
+                                .name("광운대역 500m 돈까스")
+                                .category("일식")
+                                .address("서울특별시 노원구 광운로 20")
+                                .latitude(37.6250)
+                                .longitude(127.0630)
+                                .phone("02-111-1111")
+                                .operatingHours("10:00 - 22:00")
+                                .businessStatus(BusinessStatus.OPEN)
+                                .build()
+                ));
 
         // 4. 상태가 'REQUESTED(승인 대기)'인 예약 3건을 미래 시간으로 세팅하여 주입
         for (int i = 1; i <= 3; i++) {
+            String memo = "[예약 더미] owner1 신규 예약 " + i;
+            boolean exists = reservationRepository.findAll().stream()
+                    .anyMatch(reservation -> memo.equals(reservation.getRequestMemo()));
+            if (exists) {
+                continue;
+            }
+
             Reservation res = Reservation.builder()
-                    // ... (기존 코드) ...
+                    .member(user)
+                    .store(store)
+                    .reservationAt(LocalDateTime.now().plusDays(i).withSecond(0).withNano(0))
+                    .peopleCount(2)
+                    .requestMemo(memo)
                     .status(ReservationStatus.REQUESTED)
                     .build();
             reservationRepository.save(res);
@@ -62,5 +86,19 @@ class ReservationDummyTest {
                     res.getReservationId() // 타겟 ID
             );
         }
+    }
+
+    private Member getOrCreateMember(String loginId, MemberRole role, int index) {
+        return memberRepository.findByLoginId(loginId)
+                .orElseGet(() -> memberRepository.save(
+                        Member.builder()
+                                .loginId(loginId)
+                                .passwordHash(passwordEncoder.encode("1234"))
+                                .email(loginId + "@test.com")
+                                .phone("010-9300-" + String.format("%04d", index))
+                                .role(role)
+                                .accountStatus(AccountStatus.ACTIVE)
+                                .build()
+                ));
     }
 }

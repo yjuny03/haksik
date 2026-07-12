@@ -42,8 +42,15 @@ public class Report {
     @Column(name = "processed_at")
     private java.time.LocalDateTime processedAt; // 처리 일시
 
+    @Column(name = "created_at", updatable = false)
+    private java.time.LocalDateTime createdAt;
+
     @Column(name = "processed_reason", length = 500)
     private String processedReason;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "processor_type", length = 20)
+    private ReportProcessorType processorType;
 
     @Builder
     public Report(Member reporter, String targetType, Long targetId, String reason) {
@@ -54,6 +61,13 @@ public class Report {
         this.status = ReportStatus.PENDING; // 기본값
     }
 
+    @PrePersist
+    void setCreatedAt() {
+        if (this.createdAt == null) {
+            this.createdAt = java.time.LocalDateTime.now();
+        }
+    }
+
     // 관리자 신고 관리
     // 신고 처리 완료
     public void resolve(Member admin, String processedReason) {
@@ -61,6 +75,15 @@ public class Report {
         this.processedBy = admin;
         this.processedAt = java.time.LocalDateTime.now();
         this.processedReason = processedReason;
+        this.processorType = ReportProcessorType.ADMIN;
+    }
+
+    public void resolveByAi(String processedReason) {
+        this.status = ReportStatus.RESOLVED;
+        this.processedBy = null;
+        this.processedAt = java.time.LocalDateTime.now();
+        this.processedReason = processedReason;
+        this.processorType = ReportProcessorType.AI;
     }
 
     // 신고 반려
@@ -69,6 +92,7 @@ public class Report {
         this.processedBy = admin;
         this.processedAt = java.time.LocalDateTime.now();
         this.processedReason = processedReason;
+        this.processorType = ReportProcessorType.ADMIN;
     }
 
     // 신고 처리 중 변경
@@ -76,6 +100,7 @@ public class Report {
         this.status = ReportStatus.PROCESSING;
         this.processedBy = admin;
         this.processedAt = java.time.LocalDateTime.now();
+        this.processorType = ReportProcessorType.ADMIN;
     }
 
     // 신고 처리 취소
@@ -84,6 +109,15 @@ public class Report {
         this.processedBy = null;
         this.processedAt = null;
         this.processedReason = null;
+        this.processorType = null;
+    }
+
+    public void cancelFinalProcess() {
+        this.status = ReportStatus.CANCELED;
+        this.processedBy = null;
+        this.processedAt = null;
+        this.processedReason = null;
+        this.processorType = null;
     }
 
 }

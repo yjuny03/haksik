@@ -10,6 +10,7 @@ import com.example.haksikmokjang.member.trust.domain.TrustPenaltyHistory;
 import com.example.haksikmokjang.member.trust.domain.TrustPenaltySourceType;
 import com.example.haksikmokjang.member.trust.dto.TrustInfoResponse;
 import com.example.haksikmokjang.member.trust.repository.TrustPenaltyHistoryRepository;
+import com.example.haksikmokjang.report.domain.ReportProcessorType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,7 +54,23 @@ public class TrustService {
                 TrustPenaltySourceType.REPORT,
                 reportId,
                 new BigDecimal("5.0"),
-                "관리자 신고 제재"
+                "관리자 신고 제재",
+                ReportProcessorType.ADMIN,
+                true
+        );
+    }
+
+    // AI 자동 신고 처리도 수동 처리와 같은 점수를 적용하되, 단건 처리로 계정을 즉시 잠그지는 않는다.
+    @Transactional
+    public TrustPenaltyApplyResult applyAiReportPenalty(Member targetMember, Long reportId) {
+        return applyPenalty(
+                targetMember,
+                TrustPenaltySourceType.REPORT,
+                reportId,
+                new BigDecimal("5.0"),
+                "AI 자동 신고 제재",
+                ReportProcessorType.AI,
+                false
         );
     }
 
@@ -82,10 +99,11 @@ public class TrustService {
                 TrustPenaltySourceType.NO_SHOW,
                 chatRoomId,
                 penaltyPoint,
-                "노쇼 제재"
+                "노쇼 제재",
+                null
         );
 
-        lockIfTrustZero(userProfile, "매너점수 0점 이하로 인한 계정 잠금");
+        lockIfTrustZero(userProfile, "노쇼 제재로 인한 계정 잠금");
     }
 
     // 공통 매너점수 차감
@@ -94,7 +112,9 @@ public class TrustService {
             TrustPenaltySourceType sourceType,
             Long sourceId,
             BigDecimal penaltyPoint,
-            String reason
+            String reason,
+            ReportProcessorType processorType,
+            boolean lockAccountWhenZero
     ) {
         UserProfile userProfile = userProfileRepository.findByMember(targetMember)
                 .orElseThrow(() -> new CustomException(ErrorCode.USER_PROFILE_NOT_FOUND));
@@ -123,15 +143,18 @@ public class TrustService {
                     sourceType,
                     sourceId,
                     penaltyPoint,
-                    reason
+                    reason,
+                    processorType
             );
         } else {
-            history.reactivate();
+            history.reactivate(reason, processorType);
         }
 
         BigDecimal afterMannerTemperature = userProfile.getMannerTemperature();
 
-        lockIfTrustZero(userProfile, "매너점수 0점 이하로 인한 계정 잠금");
+        if (lockAccountWhenZero) {
+            lockIfTrustZero(userProfile, "신고 제재로 인한 계정 잠금");
+        }
 
         return new TrustPenaltyApplyResult(
                 history,
@@ -158,6 +181,9 @@ public class TrustService {
 
         userProfile.restoreMannerTemperature(beforeMannerTemperature);
         penaltyHistory.cancel(admin, cancelReason);
+        if (userProfile.getMannerTemperature().compareTo(BigDecimal.ZERO) > 0) {
+            userProfile.getMember().unlockIfLockedByReportPenalty();
+        }
     }
 
     // 제재 이력 저장
@@ -166,7 +192,8 @@ public class TrustService {
             TrustPenaltySourceType sourceType,
             Long sourceId,
             BigDecimal penaltyPoint,
-            String reason
+            String reason,
+            ReportProcessorType processorType
     ) {
         TrustPenaltyHistory history = TrustPenaltyHistory.builder()
                 .targetMember(targetMember)
@@ -174,6 +201,7 @@ public class TrustService {
                 .sourceId(sourceId)
                 .penaltyPoint(penaltyPoint)
                 .reason(reason)
+                .processorType(processorType)
                 .build();
 
         return trustPenaltyHistoryRepository.save(history);

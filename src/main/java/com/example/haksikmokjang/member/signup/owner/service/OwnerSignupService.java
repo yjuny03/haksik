@@ -16,6 +16,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.example.haksikmokjang.notification.event.AdminNotificationRequestedEvent;
+import org.springframework.context.ApplicationEventPublisher;
 
 @Service
 @RequiredArgsConstructor
@@ -24,6 +26,7 @@ public class OwnerSignupService {
     private final MemberRepository memberRepository;
     private final OwnerProfileRepository ownerProfileRepository;
     private final PasswordEncoder passwordEncoder;
+    private final ApplicationEventPublisher eventPublisher;
 
     // 사업자등록번호 중복 확인
     @Transactional(readOnly = true)
@@ -79,6 +82,14 @@ public class OwnerSignupService {
                 .build();
 
         OwnerProfile savedOwnerProfile = ownerProfileRepository.save(ownerProfile);
+
+        eventPublisher.publishEvent(new AdminNotificationRequestedEvent(
+                "ADMIN_OWNER_APPROVAL_PENDING",
+                "새 점주 승인 요청이 접수되었습니다.",
+                savedOwnerProfile.getBusinessName() + " 점주 가입 신청을 확인해주세요.",
+                "OWNER_APPROVAL",
+                savedOwnerProfile.getOwnerProfileId()
+        ));
 
         OwnerSignupResponse ownerSignupResponse = new OwnerSignupResponse(
                 savedMember.getMemberId(),

@@ -1,6 +1,7 @@
 package com.example.haksikmokjang.admin.report.dto;
 
 import com.example.haksikmokjang.report.domain.Report;
+import com.example.haksikmokjang.report.domain.ReportProcessorType;
 import com.example.haksikmokjang.report.domain.ReportStatus;
 import lombok.Builder;
 import lombok.Getter;
@@ -24,9 +25,11 @@ public class AdminReportListResponse {
 
     private String processedByLoginId;
     private LocalDateTime processedAt;
+    private ReportProcessorType processorType;
+    private long sameTargetReportCount;
 
     // 신고 목록 응답 변환
-    public static AdminReportListResponse from(Report report) {
+    public static AdminReportListResponse from(Report report, long sameTargetReportCount) {
         return AdminReportListResponse.builder()
                 .reportId(report.getReportId())
                 .reporterId(report.getReporter().getMemberId())
@@ -41,6 +44,8 @@ public class AdminReportListResponse {
                                 : null
                 )
                 .processedAt(report.getProcessedAt())
+                .processorType(report.getProcessorType())
+                .sameTargetReportCount(sameTargetReportCount)
                 .build();
     }
 }

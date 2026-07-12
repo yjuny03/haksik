@@ -3,6 +3,10 @@ const pageSize = 10;
 
 // 회원 목록 초기 조회
 document.addEventListener("DOMContentLoaded", () => {
+    const role = new URLSearchParams(window.location.search).get("role");
+    if (role && document.querySelector(`#roleFilter option[value="${role}"]`)) {
+        document.getElementById("roleFilter").value = role;
+    }
     fetchMembers(0);
 });
 

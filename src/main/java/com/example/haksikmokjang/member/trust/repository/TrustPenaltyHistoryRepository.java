@@ -6,6 +6,8 @@ import com.example.haksikmokjang.member.trust.domain.TrustPenaltySourceType;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
+import java.time.LocalDateTime;
+import com.example.haksikmokjang.report.domain.ReportProcessorType;
 
 public interface TrustPenaltyHistoryRepository extends JpaRepository<TrustPenaltyHistory, Long> {
 
@@ -29,4 +31,8 @@ public interface TrustPenaltyHistoryRepository extends JpaRepository<TrustPenalt
             Long sourceId,
             String canceledYn
     );
+
+    long countByCreatedAtGreaterThanEqualAndCreatedAtLessThan(LocalDateTime start, LocalDateTime end);
+
+    long countByProcessorType(ReportProcessorType processorType);
 }

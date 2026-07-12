@@ -23,5 +23,6 @@ public interface StoreReviewRepository extends JpaRepository<StoreReview, Long> 
         List<StoreReview> findAllByStoreOwnerLoginId(@Param("ownerLoginId") String ownerLoginId);
 
         Slice<StoreReview> findByMember_LoginIdAndStatus(String loginId, ReviewStatus status, Pageable pageable);
-}
 
+        List<StoreReview> findByStore_StoreIdInAndStatusOrderByCreatedAtDesc(List<Long> storeIds, ReviewStatus status);
+}

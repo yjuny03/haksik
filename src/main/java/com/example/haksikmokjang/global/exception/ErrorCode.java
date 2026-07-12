@@ -106,7 +106,8 @@ public enum ErrorCode {
 
     //신고 권한
     CANNOT_REPORT_OWN_CONTENT(HttpStatus.BAD_REQUEST, "COMMON_4001", "자신이 작성한 게시글이나 댓글은 신고할 수 없습니다."),
-    ALREADY_REPORTED(HttpStatus.CONFLICT, "COMMON_4002", "이미 신고가 접수된 항목입니다."),
+    ALREADY_REPORTED(HttpStatus.CONFLICT, "COMMON_4002", "이미 신고한 내용입니다."),
+    ALREADY_PROCESSED_CONTENT(HttpStatus.CONFLICT, "REPORT_003", "이미 처리된 콘텐츠입니다."),
 
     //Store, 예약 관련 에러코드
     STORE_NOT_FOUND(HttpStatus.NOT_FOUND,"OWNER_002", "가게 정보를 찾을 수 없습니다."),
