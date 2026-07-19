@@ -3,6 +3,7 @@ package com.example.haksikmokjang.global.config;
 import com.example.haksikmokjang.global.security.LoginFailureHandler;
 import com.example.haksikmokjang.global.security.LoginSuccessHandler;
 import lombok.RequiredArgsConstructor;
+import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -71,9 +72,11 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
 
                 .authorizeHttpRequests(auth -> auth
+                        .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.FORWARD, DispatcherType.ASYNC).permitAll()
                         .requestMatchers(STATIC_URLS).permitAll()
                         .requestMatchers(PUBLIC_VIEW_URLS).permitAll()
                         .requestMatchers(PUBLIC_API_URLS).permitAll()
+                        .requestMatchers("/error").permitAll()
 
                         .requestMatchers("/api/view/user/**").hasRole("USER")
                         .requestMatchers("/api/view/owner/**").hasRole("OWNER")

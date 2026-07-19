@@ -45,12 +45,14 @@ public class NotificationService {
         // 연결 종료나 타임아웃 시 메모리에서 삭제
         emitter.onCompletion(() -> emitters.remove(loginId));
         emitter.onTimeout(() -> emitters.remove(loginId));
+        emitter.onError(error -> emitters.remove(loginId));
 
         try {
             // 처음 연결 시 503 에러 방지용 더미 데이터 발송
             emitter.send(SseEmitter.event().name("connect").data("connected!"));
-        } catch (IOException e) {
+        } catch (IOException | IllegalStateException e) {
             emitters.remove(loginId);
+            emitter.complete();
         }
 
         return emitter;
@@ -75,8 +77,9 @@ public class NotificationService {
             try {
                 // 프론트엔드의 'notification'이라는 이벤트 리스너로 신호를 보냄
                 emitter.send(SseEmitter.event().name("notification").data("new_notification"));
-            } catch (IOException e) {
+            } catch (IOException | IllegalStateException e) {
                 emitters.remove(receiver.getLoginId());
+                emitter.complete();
             }
         }
     }
@@ -187,8 +190,9 @@ public class NotificationService {
             try {
                 // 프론트엔드의 'notification'이라는 이벤트 리스너로 신호를 보냄
                 emitter.send(SseEmitter.event().name("notification").data("new_notification"));
-            } catch (IOException e) {
+            } catch (IOException | IllegalStateException e) {
                 emitters.remove(receiver.getLoginId());
+                emitter.complete();
             }
         }
     }
