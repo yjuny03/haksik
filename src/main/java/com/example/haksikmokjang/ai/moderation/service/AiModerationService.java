@@ -1,9 +1,12 @@
 package com.example.haksikmokjang.ai.moderation.service;
 
 import com.example.haksikmokjang.admin.report.service.AdminReportService;
+import com.example.haksikmokjang.admin.report.service.ReportRelatedActionService;
 import com.example.haksikmokjang.ai.client.AiClient;
 import com.example.haksikmokjang.ai.moderation.domain.AiModerationAnalysis;
 import com.example.haksikmokjang.ai.moderation.domain.AiProcessingStatus;
+import com.example.haksikmokjang.ai.moderation.domain.AutoHideBasis;
+import com.example.haksikmokjang.ai.moderation.domain.ModerationCategory;
 import com.example.haksikmokjang.ai.moderation.domain.ModerationDecision;
 import com.example.haksikmokjang.ai.moderation.dto.ModerationPromptRequest;
 import com.example.haksikmokjang.ai.moderation.dto.ModerationResult;
@@ -36,6 +39,7 @@ public class AiModerationService {
     private final ModerationPolicyService policyService;
     private final AiClient aiClient;
     private final AdminReportService adminReportService;
+    private final ReportRelatedActionService reportRelatedActionService;
     private final MemberRepository memberRepository;
     private final NotificationService notificationService;
 
@@ -116,12 +120,23 @@ public class AiModerationService {
                     exclusionMatched,
                     targetMatched
             );
-            String autoHideBasis = autoHideBasis(result, ruleMatched, exclusionMatched, highConfidenceFallback);
             boolean downgradedToReview = false;
             if (result.decision() == ModerationDecision.AUTO_HIDE && !policyAllowsAutoHide) {
                 result = downgradeToReview(result);
                 downgradedToReview = true;
             }
+
+            stage = "AUTO_HIDE_POLICY";
+            boolean processableTarget = isProcessableTarget(report.getTargetType());
+            boolean canAutoHide = processableTarget
+                    && report.getStatus() == ReportStatus.PENDING
+                    && policyService.canAutoHide(result, ruleMatched, exclusionMatched, targetMatched);
+            AutoHideBasis autoHideBasis = autoHideBasis(
+                    result,
+                    ruleMatched,
+                    exclusionMatched,
+                    canAutoHide
+            );
             log.info(
                     "[AI-REPORT] rule validation 결과 reportId={} targetType={} category={} decision={} ruleMatched={} exclusionMatched={} targetMatched={} highConfidenceFallback={} autoHideBasis={}",
                     reportId,
@@ -137,7 +152,7 @@ public class AiModerationService {
 
             stage = "ANALYSIS_SAVE";
             AiModerationAnalysis analysis = analysisRepository.saveAndFlush(
-                    new AiModerationAnalysis(report, result, ruleMatched)
+                    new AiModerationAnalysis(report, result, ruleMatched, autoHideBasis)
             );
             log.info(
                     "[AI-REPORT] analysisRepository.save 완료 reportId={} analysisId={} processingStatus={}",
@@ -146,11 +161,6 @@ public class AiModerationService {
                     analysis.getProcessingStatus()
             );
 
-            stage = "AUTO_HIDE_POLICY";
-            boolean processableTarget = isProcessableTarget(report.getTargetType());
-            boolean canAutoHide = processableTarget
-                    && report.getStatus() == ReportStatus.PENDING
-                    && policyService.canAutoHide(result, ruleMatched, exclusionMatched, targetMatched);
             log.info(
                     "[AI-REPORT] canAutoHide 결과 reportId={} targetType={} category={} decision={} riskScore={} confidenceScore={} ruleMatched={} exclusionMatched={} autoHideBasis={} canAutoHide={} processableTarget={} reportStatus={} highConfidenceFallback={} finalDecision={}",
                     reportId,
@@ -203,6 +213,20 @@ public class AiModerationService {
             stage = "AUTO_RESOLVE_AFTER";
             log.info("[AI-REPORT] autoResolveReport 호출 직후 reportId={} reportStatus={}", reportId, report.getStatus());
 
+            stage = "RELATED_ACTION_HIDE";
+            int relatedHiddenCount = reportRelatedActionService.hideRelatedItemsAfterAiAutoProcess(
+                    report,
+                    result,
+                    autoHideBasis
+            );
+            if (relatedHiddenCount > 0) {
+                log.info(
+                        "[AI-REPORT] 관련 메시지 함께 블라인드 완료 reportId={} relatedHiddenCount={}",
+                        reportId,
+                        relatedHiddenCount
+                );
+            }
+
             stage = "MARK_AUTO_PROCESSED";
             analysis.markAutoProcessed();
             analysisRepository.flush();
@@ -249,26 +273,37 @@ public class AiModerationService {
         return snapshot.hasAttachments() && !snapshot.substantiveText();
     }
 
-    private String autoHideBasis(
+    private AutoHideBasis autoHideBasis(
             ModerationResult result,
             boolean ruleMatched,
             boolean exclusionMatched,
-            boolean highConfidenceFallback
+            boolean canAutoHide
     ) {
         if (exclusionMatched) {
-            return "EXCLUDED_CONTEXT_REVIEW_REQUIRED";
+            return AutoHideBasis.EXCLUDED_CONTEXT_REVIEW_REQUIRED;
+        }
+        if (!autoHideEligibleCategory(result.category())) {
+            return AutoHideBasis.NOT_ELIGIBLE_CATEGORY;
+        }
+        if (canAutoHide) {
+            return ruleMatched ? AutoHideBasis.SERVER_RULE_MATCHED : AutoHideBasis.AI_HIGH_CONFIDENCE;
         }
         if (result.decision() == ModerationDecision.REVIEW_REQUIRED
                 && highRiskReviewRequired(result)) {
-            return "HIGH_RISK_REVIEW_REQUIRED";
+            return AutoHideBasis.HIGH_RISK_REVIEW_REQUIRED;
         }
-        if (ruleMatched) {
-            return "SERVER_RULE_MATCHED";
+        if (result.decision() == ModerationDecision.REVIEW_REQUIRED) {
+            return AutoHideBasis.REVIEW_REQUIRED;
         }
-        if (highConfidenceFallback) {
-            return "AI_HIGH_CONFIDENCE_FALLBACK";
-        }
-        return "NOT_AUTO_HIDE";
+        return AutoHideBasis.NOT_MATCHED;
+    }
+
+    private boolean autoHideEligibleCategory(ModerationCategory category) {
+        return category == ModerationCategory.SPAM_AD
+                || category == ModerationCategory.PERSONAL_INFO
+                || category == ModerationCategory.FLOODING
+                || category == ModerationCategory.ABUSE
+                || category == ModerationCategory.SEXUAL_HARASSMENT;
     }
 
     private boolean highRiskReviewRequired(ModerationResult result) {
@@ -284,7 +319,7 @@ public class AiModerationService {
             ModerationResult result,
             boolean ruleMatched,
             boolean exclusionMatched,
-            String autoHideBasis,
+            AutoHideBasis autoHideBasis,
             boolean canAutoHide,
             boolean downgradedToReview,
             AiProcessingStatus processingStatus

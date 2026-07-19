@@ -45,6 +45,8 @@ public class GeminiAiClient implements AiClient {
             - 명백한 정책 위반이면 decision=AUTO_HIDE를 선택하라.
             - AUTO_HIDE일 때는 반드시 ruleEvidenceRequired=true, policyCodes는 1개 이상, evidence는 짧은 근거 1개 이상을 반환하라. missingContext는 판단에 필요한 누락 정보가 없으면 빈 배열로 둔다.
             - REVIEW_REQUIRED를 선택했다면 점수가 높더라도 서버는 AUTO_HIDE로 올리지 않는다. 직접 자동 숨김이 필요할 만큼 명확하면 decision도 AUTO_HIDE로 반환하라.
+            - decision=REVIEW_REQUIRED이면 reasonSummary, evidence, alternativeReason에 "자동 숨김 처리", "자동 블라인드 처리", "자동 처리합니다" 같은 자동 처리 완료/실행 표현을 쓰지 마라.
+            - 자동 숨김/자동 블라인드/자동 처리 표현은 decision=AUTO_HIDE일 때만 사용하라.
             - 애매한 경우, 제공되지 않은 의도/신원/과거 행동/반복 횟수/사실의 진위를 추측해야 하는 경우, 인용/풍자/교육/피해 신고 가능성이나 문맥 부족이 있으면 REVIEW_REQUIRED를 선택하라.
             - 안전하면 category=SAFE, decision=NO_ACTION, riskScore <= 0.19, policyCodes=[], containsPersonalInfo=false, personalInfoTypes=[], ruleEvidenceRequired=false로 반환하라.
             - SAFE, OTHER, DEFAMATION은 자동 숨김 대상이 아니다. DEFAMATION은 법적/사실관계 의존성이 크므로 기본적으로 REVIEW_REQUIRED로 판단하라.
@@ -287,7 +289,7 @@ public class GeminiAiClient implements AiClient {
                 - containsPersonalInfo: true only when personal information is detected
                 - personalInfoTypes: PHONE, EMAIL, ACCOUNT, ADDRESS, NATIONAL_ID only when detected
                 - ruleEvidenceRequired: true for every AUTO_HIDE decision; false is allowed for SAFE
-                - reasonSummary: Korean summary under 500 characters without copying full abusive words or personal data
+                - reasonSummary: Korean summary under 500 characters without copying full abusive words or personal data; if decision=REVIEW_REQUIRED, do not say automatic hiding, automatic blinding, or automatic processing will be performed
                 - evidence: short Korean evidence phrases; AUTO_HIDE must include at least one item
                 - missingContext: empty array when no extra review context is needed
                 

@@ -260,6 +260,8 @@ function renderReportDetail(report) {
 
         ${renderContextSnapshot(report)}
 
+        ${renderRelatedActionItems(report.relatedActionItems)}
+
         <div class="detail-section">
             <h4 class="detail-section-title">신고 사유</h4>
             <div class="detail-reason-box">
@@ -368,6 +370,31 @@ function renderChatMessageContextSnapshot(snapshot) {
     `;
 }
 
+function renderRelatedActionItems(items) {
+    const relatedItems = Array.isArray(items) ? items : [];
+    if (relatedItems.length === 0) {
+        return "";
+    }
+
+    return `
+        <div class="detail-section">
+            <h4 class="detail-section-title">함께 블라인드된 관련 항목 ${relatedItems.length}건</h4>
+            <div class="context-timeline">
+                ${relatedItems.map(item => `
+                    <div class="context-timeline-item ${item.restored ? "" : "reported-context-target"}">
+                        <div class="context-timeline-meta">
+                            <strong>${targetTypeLabel(item.targetType)} #${escapeAdminHtml(item.targetId)}</strong>
+                            <span class="badge ${item.restored ? "restored" : "success"}">${item.restored ? "복구 완료" : "블라인드됨"}</span>
+                            <small>${actionTypeLabel(item.actionType)} · ${formatAdminDate(item.createdAt)}</small>
+                        </div>
+                        <div>${escapeAdminHtml(item.reason || "-")}</div>
+                    </div>
+                `).join("")}
+            </div>
+        </div>
+    `;
+}
+
 function renderAiAnalysis(ai, attachments) {
     if (!ai) {
         return `
@@ -397,10 +424,11 @@ function renderAiAnalysis(ai, attachments) {
                 <div class="detail-item"><span class="detail-label">판단 확실성</span><strong>${formatPercent(ai.confidenceScore)}</strong></div>
                 <div class="detail-item"><span class="detail-label">정책 코드</span><strong>${policyCodes}</strong></div>
             </div>
-            <div class="detail-reason-box">${escapeAdminHtml(ai.reasonSummary)}</div>
+            <div class="detail-reason-box">${escapeAdminHtml(aiFinalDescription(ai))}</div>
             <details class="tech-detail">
                 <summary>기술 상세</summary>
                 <div>모델: ${escapeAdminHtml(ai.modelName)}</div>
+                <div>AI 원문 요약: ${escapeAdminHtml(sanitizeAiReasonForDisplay(ai))}</div>
             </details>
             ${attachmentNotice}
         </div>
@@ -485,6 +513,9 @@ function autoHideCriteriaLabel(ai) {
     if (!ai) {
         return "미충족";
     }
+    if (ai.autoHideBasis) {
+        return autoHideBasisLabel(ai.autoHideBasis);
+    }
     if (ai.ruleMatched === true || ai.ruleMatched === "Y") {
         return "서버 규칙 충족";
     }
@@ -498,6 +529,73 @@ function autoHideCriteriaLabel(ai) {
         return "AI 고확신 기준 충족";
     }
     return "미충족";
+}
+
+function autoHideBasisLabel(value) {
+    return ({
+        SERVER_RULE_MATCHED: "서버 규칙 충족",
+        AI_HIGH_CONFIDENCE: "AI 고확신 기준 충족",
+        EXCLUDED_CONTEXT_REVIEW_REQUIRED: "예외 맥락으로 관리자 검토",
+        HIGH_RISK_REVIEW_REQUIRED: "고위험 검토 필요",
+        REVIEW_REQUIRED: "관리자 검토 필요",
+        NOT_MATCHED: "미충족",
+        NOT_ELIGIBLE_CATEGORY: "자동 처리 제외 대상",
+        AI_FAILED: "AI 분석 실패"
+    })[value] || escapeAdminHtml(value);
+}
+
+function aiFinalDescription(ai) {
+    if (!ai) {
+        return "AI 분석 결과가 없습니다.";
+    }
+    if (isAiAutoProcessed(ai)) {
+        return ai.autoHideBasis === "AI_HIGH_CONFIDENCE"
+            ? "AI 고확신 기준으로 자동 블라인드 처리되었습니다."
+            : "AI가 위반 가능성이 높다고 판단하여 자동 숨김 처리했습니다.";
+    }
+    if (ai.autoHideBasis === "EXCLUDED_CONTEXT_REVIEW_REQUIRED") {
+        return "인용/피해 신고/예시 등 예외 문맥 가능성이 있어 관리자 검토가 필요합니다.";
+    }
+    if (ai.autoHideBasis === "HIGH_RISK_REVIEW_REQUIRED") {
+        return "AI가 위험도가 높다고 판단했지만 자동 처리 조건을 충족하지 않아 관리자 검토가 필요합니다.";
+    }
+    if (ai.autoHideBasis === "NOT_MATCHED") {
+        return "자동 처리 기준을 충족하지 않아 관리자 검토가 필요합니다.";
+    }
+    if (ai.autoHideBasis === "NOT_ELIGIBLE_CATEGORY") {
+        return "자동 처리 제외 대상이므로 관리자 검토가 필요합니다.";
+    }
+    if (ai.autoHideBasis === "AI_FAILED" || ai.processingStatus === "FAILED") {
+        return "AI 분석 실패로 관리자 검토가 필요합니다.";
+    }
+    if (ai.decision === "REVIEW_REQUIRED" || ai.processingStatus === "REVIEW_REQUIRED") {
+        return "AI가 위험도를 감지했지만 자동 처리 조건을 충족하지 않아 관리자 검토가 필요합니다.";
+    }
+    if (ai.decision === "NO_ACTION") {
+        return "AI가 자동 조치가 필요하지 않은 것으로 판단했습니다.";
+    }
+    return sanitizeAiReasonForDisplay(ai) || "AI 자동 분석이 수행되었습니다.";
+}
+
+function isAiAutoProcessed(ai) {
+    return ai
+        && (
+            ai.processingStatus === "AUTO_PROCESSED"
+            || (ai.decision === "AUTO_HIDE"
+                && ai.processingStatus !== "REVIEW_REQUIRED"
+                && ai.processingStatus !== "FAILED")
+        );
+}
+
+function sanitizeAiReasonForDisplay(ai) {
+    const reason = String(ai?.reasonSummary || "");
+    if (isAiAutoProcessed(ai)) {
+        return reason;
+    }
+    return reason
+        .replace(/자동\s*숨김\s*처리(?:합니다|했습니다|됩니다|되었습니다)?/g, "관리자 검토가 필요합니다")
+        .replace(/자동\s*블라인드\s*처리(?:합니다|했습니다|됩니다|되었습니다)?/g, "관리자 검토가 필요합니다")
+        .replace(/자동\s*처리(?:합니다|했습니다|됩니다|되었습니다)?/g, "관리자 검토가 필요합니다");
 }
 
 function isHighRiskReview(ai) {
@@ -521,6 +619,21 @@ function isExcludedContextReview(ai) {
 
 function messageTypeLabel(value) {
     return ({TEXT: "텍스트", IMAGE: "이미지", FORM: "폼"})[value] || escapeAdminHtml(value);
+}
+
+function targetTypeLabel(value) {
+    return ({
+        CHAT_MESSAGE: "채팅 메시지",
+        COMMENT: "댓글",
+        POST: "게시글",
+        REVIEW: "리뷰"
+    })[value] || escapeAdminHtml(value);
+}
+
+function actionTypeLabel(value) {
+    return ({
+        AI_RELATED_HIDE: "AI 관련 항목 블라인드"
+    })[value] || escapeAdminHtml(value);
 }
 
 function renderReasonPill(reason) {
@@ -573,6 +686,25 @@ function renderProcessHistory(report) {
             time: report.processedAt
         });
     }
+    const relatedItems = Array.isArray(report.relatedActionItems) ? report.relatedActionItems : [];
+    const hiddenRelatedCount = relatedItems.length;
+    const restoredRelatedCount = relatedItems.filter(item => item.restored).length;
+    if (hiddenRelatedCount > 0) {
+        items.push({
+            title: "관련 메시지 함께 블라인드",
+            content: relatedHideHistorySentence(report, hiddenRelatedCount),
+            meta: restoredRelatedCount > 0 ? `복구 완료 ${restoredRelatedCount}건` : "",
+            time: relatedItems[0]?.createdAt
+        });
+    }
+    if (restoredRelatedCount > 0) {
+        items.push({
+            title: "관련 메시지 복구",
+            content: relatedRestoreHistorySentence(report, restoredRelatedCount),
+            meta: "",
+            time: relatedItems.find(item => item.restoredAt)?.restoredAt
+        });
+    }
     if (items.length === 0) {
         items.push({
             title: "접수됨",
@@ -598,6 +730,34 @@ function renderProcessHistory(report) {
             </div>
         </div>
     `;
+}
+
+function relatedHideHistorySentence(report, count) {
+    const category = report.aiAnalysis?.category;
+    if (category === "SPAM_AD") {
+        return `AI가 광고/스팸 맥락으로 판단하여 관련 메시지 ${count}건을 함께 블라인드 처리했습니다.`;
+    }
+    if (category === "FLOODING") {
+        return `AI가 도배 맥락으로 판단하여 관련 메시지 ${count}건을 함께 블라인드 처리했습니다.`;
+    }
+    if (category === "ABUSE") {
+        return `AI가 욕설/비방 맥락으로 판단하여 관련 메시지 ${count}건을 함께 블라인드 처리했습니다.`;
+    }
+    return `AI가 정책 위반 맥락으로 판단하여 관련 메시지 ${count}건을 함께 블라인드 처리했습니다.`;
+}
+
+function relatedRestoreHistorySentence(report, count) {
+    const category = report.aiAnalysis?.category;
+    if (category === "ABUSE") {
+        return `AI 자동 처리 취소로 관련 욕설/비방 메시지 ${count}건을 함께 복구했습니다.`;
+    }
+    if (category === "SPAM_AD") {
+        return `AI 자동 처리 취소로 관련 광고/스팸 메시지 ${count}건을 함께 복구했습니다.`;
+    }
+    if (category === "FLOODING") {
+        return `AI 자동 처리 취소로 관련 도배 메시지 ${count}건을 함께 복구했습니다.`;
+    }
+    return `AI 자동 처리 취소로 관련 메시지 ${count}건을 함께 복구했습니다.`;
 }
 
 function aiHistorySentence(report) {

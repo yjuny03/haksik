@@ -35,10 +35,14 @@ public class ModerationRuleValidationService {
             "텔레그램", "오픈채팅", "선착순", "오늘만", "지금 클릭"
     );
     private static final List<String> ABUSE_TERMS = List.of(
-            "바보", "멍청이", "병신", "개새끼", "씨발", "죽어"
+            "바보", "멍청이", "병신", "개병신", "개새끼", "씨발", "미친놈", "미친년", "꺼져", "죽어", "한심하다"
     );
     private static final List<String> SEVERE_ABUSE_TERMS = List.of(
-            "병신", "개새끼", "씨발", "죽어"
+            "병신", "개병신", "개새끼", "씨발", "미친놈", "미친년", "꺼져", "죽어"
+    );
+    private static final List<String> RELATED_ABUSE_TERMS = List.of(
+            "병신", "개병신", "시발련", "시발련아", "씨발련", "씨발련아", "개새끼", "꺼져",
+            "처먹어라", "신고나 처먹어라", "ㅇㅈㄹ", "지랄", "한심하다"
     );
     private static final List<String> SEXUAL_HARASSMENT_TERMS = List.of(
             "섹스하자", "자자", "따먹", "박고", "빨아", "벗어", "만져", "보지", "자지", "꼴리",
@@ -50,7 +54,7 @@ public class ModerationRuleValidationService {
     private static final List<String> TARGET_TERMS = List.of(
             "너", "넌", "너는", "너를", "너한테", "너에게", "너희",
             "네가", "니", "니가", "니는", "니를", "니한테",
-            "당신", "글쓴이", "작성자", "저 사람", "저놈", "저년", "@"
+            "당신", "글쓴이", "작성자", "상대방", "저 사람", "저놈", "저년", "@"
     );
     private static final List<String> CONTEXT_EXCLUSION_TERMS = List.of(
             "라고 말했다", "라고 했", "라고 욕", "욕설 예시", "교육 목적", "신고합니다", "신고했", "피해 내용",
@@ -153,6 +157,32 @@ public class ModerationRuleValidationService {
 
     public boolean targetMatched(ModerationCategory category, String content) {
         return inspectForCategory(category, content).targetMatched();
+    }
+
+    public boolean spamContextMatched(String content) {
+        RuleEvidence evidence = inspect(content);
+        return evidence.spamMatched() || evidence.spamAutoHideMatched();
+    }
+
+    public boolean spamRelatedMessageCandidate(String content) {
+        String value = content == null ? "" : content;
+        String normalized = value.toLowerCase(Locale.ROOT);
+        return URL_PATTERN.matcher(value).find()
+                || containsAny(normalized, HIGH_RISK_SPAM_TERMS)
+                || containsAny(normalized, List.of(
+                "오픈채팅", "텔레그램", "수익", "입금", "출금", "원금", "가입", "지급", "리딩방", "투자"
+        ));
+    }
+
+    public boolean floodingMessageMatched(String content) {
+        return inspect(content).floodingMatched();
+    }
+
+    public boolean abuseRelatedMessageCandidate(String content) {
+        String value = content == null ? "" : content;
+        String normalized = value.toLowerCase(Locale.ROOT);
+        RuleEvidence evidence = inspect(value);
+        return containsAny(normalized, RELATED_ABUSE_TERMS) && !evidence.contextExcluded();
     }
 
     private boolean containsAny(String content, List<String> terms) {
