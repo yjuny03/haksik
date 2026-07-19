@@ -46,6 +46,7 @@ public class ReportService {
     private final StoreReviewRepository storeReviewRepository;
     private final MemberRepository memberRepository;
     private final ApplicationEventPublisher eventPublisher;
+    private final ReportContextSnapshotService reportContextSnapshotService;
 
     // 게시글/댓글 신고
     public void createReport(String loginId, ReportRequest request) {
@@ -94,6 +95,7 @@ public class ReportService {
                 .build();
 
         reportRepository.save(report);
+        reportContextSnapshotService.createSnapshot(report);
         notifyAdminsWhenTargetBecomesRepeated(report);
         eventPublisher.publishEvent(new ReportCreatedEvent(report.getReportId()));
     }
@@ -127,6 +129,7 @@ public class ReportService {
                 .build();
 
         reportRepository.save(report);
+        reportContextSnapshotService.createSnapshot(report);
         notifyAdminsWhenTargetBecomesRepeated(report);
         eventPublisher.publishEvent(new ReportCreatedEvent(report.getReportId()));
     }
@@ -165,6 +168,7 @@ public class ReportService {
                 .build();
 
         reportRepository.save(report);
+        reportContextSnapshotService.createSnapshot(report);
         notifyAdminsWhenTargetBecomesRepeated(report);
         eventPublisher.publishEvent(new ReportCreatedEvent(report.getReportId()));
     }

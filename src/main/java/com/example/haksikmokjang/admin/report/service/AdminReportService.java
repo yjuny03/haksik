@@ -21,6 +21,7 @@ import com.example.haksikmokjang.notification.service.NotificationService;
 import com.example.haksikmokjang.report.domain.Report;
 import com.example.haksikmokjang.report.domain.ReportStatus;
 import com.example.haksikmokjang.report.domain.ReportProcessorType;
+import com.example.haksikmokjang.report.repository.ReportContextSnapshotRepository;
 import com.example.haksikmokjang.report.repository.ReportRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -48,6 +49,7 @@ public class AdminReportService {
     private final FileAttachmentRepository fileAttachmentRepository;
     private final ReportProcessHistoryRepository reportProcessHistoryRepository;
     private final AiModerationAnalysisRepository aiModerationAnalysisRepository;
+    private final ReportContextSnapshotRepository reportContextSnapshotRepository;
 
     // 신고 목록 검색 페이지 조회
     public PageResponse<AdminReportListResponse> findReports(
@@ -130,9 +132,14 @@ public class AdminReportService {
                 .map(AiModerationAnalysisResponse::from)
                 .orElse(null);
 
+        String contextSnapshotJson = reportContextSnapshotRepository.findByReport(report)
+                .map(snapshot -> snapshot.getSnapshotJson())
+                .orElse(null);
+
         return detail
                 .withAttachments(findTargetAttachments(report))
-                .withAiAnalysis(aiAnalysis);
+                .withAiAnalysis(aiAnalysis)
+                .withContextSnapshotJson(contextSnapshotJson);
     }
 
     // 신고 대상 첨부파일 조회

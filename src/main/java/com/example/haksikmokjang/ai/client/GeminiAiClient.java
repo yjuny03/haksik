@@ -44,12 +44,16 @@ public class GeminiAiClient implements AiClient {
             공통 판단 원칙:
             - 명백한 정책 위반이면 decision=AUTO_HIDE를 선택하라.
             - AUTO_HIDE일 때는 반드시 ruleEvidenceRequired=true, policyCodes는 1개 이상, evidence는 짧은 근거 1개 이상을 반환하라. missingContext는 판단에 필요한 누락 정보가 없으면 빈 배열로 둔다.
+            - REVIEW_REQUIRED를 선택했다면 점수가 높더라도 서버는 AUTO_HIDE로 올리지 않는다. 직접 자동 숨김이 필요할 만큼 명확하면 decision도 AUTO_HIDE로 반환하라.
             - 애매한 경우, 제공되지 않은 의도/신원/과거 행동/반복 횟수/사실의 진위를 추측해야 하는 경우, 인용/풍자/교육/피해 신고 가능성이나 문맥 부족이 있으면 REVIEW_REQUIRED를 선택하라.
             - 안전하면 category=SAFE, decision=NO_ACTION, riskScore <= 0.19, policyCodes=[], containsPersonalInfo=false, personalInfoTypes=[], ruleEvidenceRequired=false로 반환하라.
+            - SAFE, OTHER, DEFAMATION은 자동 숨김 대상이 아니다. DEFAMATION은 법적/사실관계 의존성이 크므로 기본적으로 REVIEW_REQUIRED로 판단하라.
             
             자동 숨김 점수 기준:
-            - SPAM_AD, PERSONAL_INFO, FLOODING을 AUTO_HIDE로 판단하면 riskScore >= 0.90 및 confidenceScore >= 0.90이어야 한다.
-            - ABUSE를 AUTO_HIDE로 판단하면 riskScore >= 0.95 및 confidenceScore >= 0.95이어야 하고, policyCodes에 ABUSE-SEVERE를 반드시 포함하라.
+            - SPAM_AD, PERSONAL_INFO, FLOODING을 AUTO_HIDE로 판단하면 riskScore >= 0.95 및 confidenceScore >= 0.95를 권장한다.
+            - ABUSE 또는 SEXUAL_HARASSMENT를 AUTO_HIDE로 판단하면 riskScore >= 0.97 및 confidenceScore >= 0.97를 권장한다.
+            - ABUSE AUTO_HIDE는 policyCodes에 ABUSE-DIRECT, ABUSE-SEVERE를 포함하라.
+            - SEXUAL_HARASSMENT AUTO_HIDE는 policyCodes에 SEXUAL-HARASSMENT-DIRECT, SEXUAL-HARASSMENT-SEVERE를 포함하라.
             
             SPAM_AD 기준:
             - URL(http, https, www)이 있고 구매/특가/오늘만/할인/이벤트/가입/지급/클릭/무료/수익/한정/홍보/광고/대출/투자/텔레그램/오픈채팅 같은 상업 문구가 있으면 SPAM_AD 후보이다.
@@ -71,9 +75,15 @@ public class GeminiAiClient implements AiClient {
             
             ABUSE 기준:
             - 일반 ABUSE는 REVIEW_REQUIRED다.
-            - 병신/개새끼/씨발/죽어 등 고강도 욕설이 있고, 너/네가/니가/당신/저 사람/저놈/저년/@ 등 직접 대상이 있으며, 인용/교육/피해 신고/장난/자기표현 맥락이 없을 때만 AUTO_HIDE로 판단하라.
+            - 병신/개새끼/씨발/죽어 등 고강도 욕설이 있고, 너/넌/너는/니/니가/당신/글쓴이/작성자/저 사람/저놈/저년/@ 등 직접 대상이 있으며, 인용/교육/피해 신고/장난/농담/자기표현 맥락이 없을 때만 AUTO_HIDE로 판단하라.
             - ABUSE AUTO_HIDE의 필수 policyCodes는 ABUSE-DIRECT, ABUSE-SEVERE이다.
             - 일반 욕설, 인용, 교육 목적, 피해 신고, 장난, 자기표현, 문맥 부족은 REVIEW_REQUIRED로 판단하라.
+
+            SEXUAL_HARASSMENT 기준:
+            - 특정 대상에게 성적 수치심을 주는 성적 모욕, 신체/성적 발언, 원치 않는 성적 접근은 SEXUAL_HARASSMENT 후보이다.
+            - 직접 대상이 명확하고 성적 괴롭힘 강도가 높으며 인용/교육/피해 신고/장난/농담/자기표현 맥락이 없으면 AUTO_HIDE로 판단하라.
+            - SEXUAL_HARASSMENT AUTO_HIDE의 필수 policyCodes는 SEXUAL-HARASSMENT-DIRECT, SEXUAL-HARASSMENT-SEVERE이다.
+            - 성희롱 발언을 인용하거나 피해를 설명하거나 예시/교육 목적으로 언급하는 경우는 REVIEW_REQUIRED로 판단하라.
             
             개인정보 원문이나 욕설 전체를 reasonSummary에 복사하지 마라. 영구 삭제, 계정 제재, 점수 감소를 제안하지 마라.
             Markdown과 코드 펜스를 사용하지 말고 JSON 객체 하나만 반환하라.
@@ -281,6 +291,13 @@ public class GeminiAiClient implements AiClient {
                 - evidence: short Korean evidence phrases; AUTO_HIDE must include at least one item
                 - missingContext: empty array when no extra review context is needed
                 
+                context_usage_rule:
+                - reported_target is the actually reported content.
+                - context is auxiliary evidence only for interpreting the reported_target.
+                - AUTO_HIDE is allowed only when the reported_target is clearly connected to the violating context.
+                - Do not AUTO_HIDE based only on unrelated context or old behavior.
+                - REVIEW, CHAT_MEMBER, MEMBER, USER reports use the single reported target basis without expanded context.
+                
                 Apply the same automatic handling criteria as the server rule validator. Return only one JSON object.
                 
                 <untrusted_content>
@@ -401,7 +418,9 @@ public class GeminiAiClient implements AiClient {
                 "SPAM-SUSPICIOUS-URL",
                 "FLOOD-CONTENT-REPEAT",
                 "ABUSE-DIRECT",
-                "ABUSE-SEVERE"
+                "ABUSE-SEVERE",
+                "SEXUAL-HARASSMENT-DIRECT",
+                "SEXUAL-HARASSMENT-SEVERE"
         ));
         schemaProperties.put("containsPersonalInfo", Map.of("type", "boolean"));
         schemaProperties.put("personalInfoTypes", stringEnumArraySchema(

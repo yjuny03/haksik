@@ -3,6 +3,8 @@ package com.example.haksikmokjang.ai.moderation.service;
 import com.example.haksikmokjang.admin.report.service.AdminReportService;
 import com.example.haksikmokjang.ai.client.AiClient;
 import com.example.haksikmokjang.ai.moderation.domain.AiModerationAnalysis;
+import com.example.haksikmokjang.ai.moderation.domain.AiProcessingStatus;
+import com.example.haksikmokjang.ai.moderation.domain.ModerationDecision;
 import com.example.haksikmokjang.ai.moderation.dto.ModerationPromptRequest;
 import com.example.haksikmokjang.ai.moderation.dto.ModerationResult;
 import com.example.haksikmokjang.ai.moderation.repository.AiModerationAnalysisRepository;
@@ -101,16 +103,36 @@ public class AiModerationService {
             );
 
             stage = "RULE_VALIDATION";
-            boolean ruleMatched = ruleValidationService.matches(result.category(), content);
-            if (result.decision() == com.example.haksikmokjang.ai.moderation.domain.ModerationDecision.AUTO_HIDE
-                    && !ruleMatched) {
+            ModerationRuleValidationService.CategoryRuleEvidence ruleEvidence =
+                    ruleValidationService.inspectForCategory(result.category(), content);
+            boolean ruleMatched = ruleEvidence.ruleMatched();
+            boolean exclusionMatched = ruleEvidence.exclusionMatched();
+            boolean targetMatched = ruleEvidence.targetMatched();
+            boolean highConfidenceFallback = !ruleMatched
+                    && policyService.canAutoHideByHighConfidenceFallback(result, exclusionMatched, targetMatched);
+            boolean policyAllowsAutoHide = policyService.canAutoHide(
+                    result,
+                    ruleMatched,
+                    exclusionMatched,
+                    targetMatched
+            );
+            String autoHideBasis = autoHideBasis(result, ruleMatched, exclusionMatched, highConfidenceFallback);
+            boolean downgradedToReview = false;
+            if (result.decision() == ModerationDecision.AUTO_HIDE && !policyAllowsAutoHide) {
                 result = downgradeToReview(result);
+                downgradedToReview = true;
             }
             log.info(
-                    "[AI-REPORT] ruleMatched 결과 reportId={} category={} ruleMatched={}",
+                    "[AI-REPORT] rule validation 결과 reportId={} targetType={} category={} decision={} ruleMatched={} exclusionMatched={} targetMatched={} highConfidenceFallback={} autoHideBasis={}",
                     reportId,
+                    report.getTargetType(),
                     result.category(),
-                    ruleMatched
+                    result.decision(),
+                    ruleMatched,
+                    exclusionMatched,
+                    targetMatched,
+                    highConfidenceFallback,
+                    autoHideBasis
             );
 
             stage = "ANALYSIS_SAVE";
@@ -128,18 +150,37 @@ public class AiModerationService {
             boolean processableTarget = isProcessableTarget(report.getTargetType());
             boolean canAutoHide = processableTarget
                     && report.getStatus() == ReportStatus.PENDING
-                    && policyService.canAutoHide(result, ruleMatched);
+                    && policyService.canAutoHide(result, ruleMatched, exclusionMatched, targetMatched);
             log.info(
-                    "[AI-REPORT] canAutoHide 결과 reportId={} canAutoHide={} processableTarget={} reportStatus={} ruleMatched={}",
+                    "[AI-REPORT] canAutoHide 결과 reportId={} targetType={} category={} decision={} riskScore={} confidenceScore={} ruleMatched={} exclusionMatched={} autoHideBasis={} canAutoHide={} processableTarget={} reportStatus={} highConfidenceFallback={} finalDecision={}",
                     reportId,
+                    report.getTargetType(),
+                    result.category(),
+                    result.decision(),
+                    result.riskScore(),
+                    result.confidenceScore(),
+                    ruleMatched,
+                    exclusionMatched,
+                    autoHideBasis,
                     canAutoHide,
                     processableTarget,
                     report.getStatus(),
-                    ruleMatched
+                    highConfidenceFallback,
+                    result.decision()
             );
 
             if (!canAutoHide) {
                 analysis.markReviewRequired();
+                logModerationDecision(
+                        report,
+                        result,
+                        ruleMatched,
+                        exclusionMatched,
+                        autoHideBasis,
+                        canAutoHide,
+                        downgradedToReview,
+                        analysis.getProcessingStatus()
+                );
                 notifyReviewRequired(report, result);
                 log.info(
                         "[AI-REPORT] 관리자 검토 전환 reportId={} processingStatus={}",
@@ -165,6 +206,16 @@ public class AiModerationService {
             stage = "MARK_AUTO_PROCESSED";
             analysis.markAutoProcessed();
             analysisRepository.flush();
+            logModerationDecision(
+                    report,
+                    result,
+                    ruleMatched,
+                    exclusionMatched,
+                    autoHideBasis,
+                    canAutoHide,
+                    downgradedToReview,
+                    analysis.getProcessingStatus()
+            );
             notifyAutoProcessed(report, result, autoResolveResult.targetWriter());
             log.info(
                     "[AI-REPORT] markAutoProcessed 완료 reportId={} analysisId={} processingStatus={}",
@@ -196,6 +247,64 @@ public class AiModerationService {
             ModerationTargetContentService.TargetContentSnapshot snapshot
     ) {
         return snapshot.hasAttachments() && !snapshot.substantiveText();
+    }
+
+    private String autoHideBasis(
+            ModerationResult result,
+            boolean ruleMatched,
+            boolean exclusionMatched,
+            boolean highConfidenceFallback
+    ) {
+        if (exclusionMatched) {
+            return "EXCLUDED_CONTEXT_REVIEW_REQUIRED";
+        }
+        if (result.decision() == ModerationDecision.REVIEW_REQUIRED
+                && highRiskReviewRequired(result)) {
+            return "HIGH_RISK_REVIEW_REQUIRED";
+        }
+        if (ruleMatched) {
+            return "SERVER_RULE_MATCHED";
+        }
+        if (highConfidenceFallback) {
+            return "AI_HIGH_CONFIDENCE_FALLBACK";
+        }
+        return "NOT_AUTO_HIDE";
+    }
+
+    private boolean highRiskReviewRequired(ModerationResult result) {
+        return result.decision() == ModerationDecision.REVIEW_REQUIRED
+                && result.riskScore() != null
+                && result.confidenceScore() != null
+                && result.riskScore().compareTo(new BigDecimal("0.90")) >= 0
+                && result.confidenceScore().compareTo(new BigDecimal("0.90")) >= 0;
+    }
+
+    private void logModerationDecision(
+            Report report,
+            ModerationResult result,
+            boolean ruleMatched,
+            boolean exclusionMatched,
+            String autoHideBasis,
+            boolean canAutoHide,
+            boolean downgradedToReview,
+            AiProcessingStatus processingStatus
+    ) {
+        log.info(
+                "[AI-REPORT] 자동 처리 기준 진단 reportId={} targetType={} category={} decision={} riskScore={} confidenceScore={} ruleMatched={} exclusionMatched={} autoHideBasis={} canAutoHide={} downgradeToReview={} finalDecision={} processingStatus={}",
+                report.getReportId(),
+                report.getTargetType(),
+                result.category(),
+                result.decision(),
+                result.riskScore(),
+                result.confidenceScore(),
+                ruleMatched,
+                exclusionMatched,
+                autoHideBasis,
+                canAutoHide,
+                downgradedToReview,
+                result.decision(),
+                processingStatus
+        );
     }
 
     private ModerationResult downgradeToReview(ModerationResult result) {

@@ -38,6 +38,7 @@ public class AdminReportDetailResponse {
     private String targetWriterLoginId;
     private String targetStatus;
     private List<FileAttachmentResponse> attachments;
+    private String contextSnapshotJson;
 
     // 신고 상세 응답 변환
     public static AdminReportDetailResponse from(
@@ -61,6 +62,7 @@ public class AdminReportDetailResponse {
                 .reason(report.getReason())
                 .status(report.getStatus())
                 .attachments(List.of())
+                .contextSnapshotJson(null)
                 .processedByLoginId(
                         report.getProcessedBy() != null
                                 ? report.getProcessedBy().getLoginId()
@@ -92,6 +94,7 @@ public class AdminReportDetailResponse {
                 .targetWriterLoginId(this.targetWriterLoginId)
                 .targetStatus(this.targetStatus)
                 .attachments(attachments == null ? List.of() : attachments)
+                .contextSnapshotJson(this.contextSnapshotJson)
                 .build();
     }
 
@@ -115,6 +118,31 @@ public class AdminReportDetailResponse {
                 .targetWriterLoginId(this.targetWriterLoginId)
                 .targetStatus(this.targetStatus)
                 .attachments(this.attachments == null ? List.of() : this.attachments)
+                .contextSnapshotJson(this.contextSnapshotJson)
+                .build();
+    }
+
+    public AdminReportDetailResponse withContextSnapshotJson(String contextSnapshotJson) {
+        return AdminReportDetailResponse.builder()
+                .reportId(this.reportId)
+                .reporterId(this.reporterId)
+                .reporterLoginId(this.reporterLoginId)
+                .reporterEmail(this.reporterEmail)
+                .targetType(this.targetType)
+                .targetId(this.targetId)
+                .reason(this.reason)
+                .status(this.status)
+                .processedByLoginId(this.processedByLoginId)
+                .processedAt(this.processedAt)
+                .processedReason(this.processedReason)
+                .processorType(this.processorType)
+                .aiAnalysis(this.aiAnalysis)
+                .targetTitle(this.targetTitle)
+                .targetContent(this.targetContent)
+                .targetWriterLoginId(this.targetWriterLoginId)
+                .targetStatus(this.targetStatus)
+                .attachments(this.attachments == null ? List.of() : this.attachments)
+                .contextSnapshotJson(contextSnapshotJson)
                 .build();
     }
 }

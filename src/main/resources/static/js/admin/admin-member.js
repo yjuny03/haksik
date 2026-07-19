@@ -1,4 +1,5 @@
 let currentPage = 0;
+let selectedMemberId = null;
 const pageSize = 10;
 
 // 회원 목록 초기 조회
@@ -55,8 +56,10 @@ function renderMembers(members) {
             ? `${member.noShowCount}회`
             : "-";
 
+        const selectedClass = Number(member.memberId) === Number(selectedMemberId) ? "selected-admin-row" : "";
+
         tbody.innerHTML += `
-            <tr>
+            <tr class="${selectedClass}" data-member-id="${member.memberId}">
                 <td>${member.memberId}</td>
                 <td>${member.loginId}</td>
                 <td>${member.role}</td>
@@ -126,6 +129,8 @@ function renderPagination(pageData) {
 
 // 회원 상세 조회
 function openMemberDetail(memberId) {
+    selectedMemberId = memberId;
+    markSelectedMemberRow(memberId);
     fetch(`/api/admin/members/${memberId}`)
         .then(response => {
             if (!response.ok) {
@@ -141,6 +146,12 @@ function openMemberDetail(memberId) {
             console.error(error);
             alert("회원 상세 조회 중 오류가 발생했습니다.");
         });
+}
+
+function markSelectedMemberRow(memberId) {
+    document.querySelectorAll("#memberTableBody tr").forEach(row => {
+        row.classList.toggle("selected-admin-row", row.dataset.memberId === String(memberId));
+    });
 }
 
 // 회원 상세 모달 출력
