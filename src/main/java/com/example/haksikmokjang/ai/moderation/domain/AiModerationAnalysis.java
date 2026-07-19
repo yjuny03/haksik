@@ -69,6 +69,10 @@ public class AiModerationAnalysis extends BaseEntity {
     @Column(name = "rule_matched", nullable = false)
     private boolean ruleMatched;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "auto_hide_basis", length = 50)
+    private AutoHideBasis autoHideBasis;
+
     @Column(name = "analyzed_at", nullable = false)
     private LocalDateTime analyzedAt;
 
@@ -79,6 +83,15 @@ public class AiModerationAnalysis extends BaseEntity {
     private String restoreReason;
 
     public AiModerationAnalysis(Report report, ModerationResult result, boolean ruleMatched) {
+        this(report, result, ruleMatched, null);
+    }
+
+    public AiModerationAnalysis(
+            Report report,
+            ModerationResult result,
+            boolean ruleMatched,
+            AutoHideBasis autoHideBasis
+    ) {
         this.report = report;
         this.category = result.category();
         this.decision = result.decision();
@@ -92,6 +105,7 @@ public class AiModerationAnalysis extends BaseEntity {
         this.modelName = result.modelName();
         this.policyVersion = result.policyVersion();
         this.ruleMatched = ruleMatched;
+        this.autoHideBasis = autoHideBasis;
         this.analyzedAt = LocalDateTime.now();
     }
 
@@ -110,6 +124,7 @@ public class AiModerationAnalysis extends BaseEntity {
         analysis.modelName = modelName;
         analysis.policyVersion = "MODERATION_POLICY_V1";
         analysis.ruleMatched = false;
+        analysis.autoHideBasis = AutoHideBasis.AI_FAILED;
         analysis.analyzedAt = LocalDateTime.now();
         return analysis;
     }

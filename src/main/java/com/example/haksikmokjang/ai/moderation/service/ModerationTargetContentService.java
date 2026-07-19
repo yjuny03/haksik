@@ -6,6 +6,7 @@ import com.example.haksikmokjang.community.post.repository.PostRepository;
 import com.example.haksikmokjang.ownerpage.store.repository.StoreReviewRepository;
 import com.example.haksikmokjang.fileattachment.repository.FileAttachmentRepository;
 import com.example.haksikmokjang.report.domain.Report;
+import com.example.haksikmokjang.report.repository.ReportContextSnapshotRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,12 +21,23 @@ public class ModerationTargetContentService {
     private final ChatMessageRepository chatMessageRepository;
     private final StoreReviewRepository storeReviewRepository;
     private final FileAttachmentRepository fileAttachmentRepository;
+    private final ReportContextSnapshotRepository reportContextSnapshotRepository;
 
     public String getContent(Report report) {
         return getSnapshot(report).content();
     }
 
     public TargetContentSnapshot getSnapshot(Report report) {
+        String snapshotAiInputText = reportContextSnapshotRepository.findByReport(report)
+                .map(snapshot -> snapshot.getAiInputText() == null ? "" : snapshot.getAiInputText())
+                .orElse(null);
+        if (snapshotAiInputText != null) {
+            boolean hasAttachments = !fileAttachmentRepository
+                    .findByTargetTypeAndTargetId(report.getTargetType(), report.getTargetId())
+                    .isEmpty();
+            return new TargetContentSnapshot(snapshotAiInputText, !isNonTextPlaceholder(snapshotAiInputText), hasAttachments);
+        }
+
         String content = switch (report.getTargetType()) {
             case "POST" -> postRepository.findById(report.getTargetId())
                     .map(post -> joinText(post.getTitle(), post.getContent()))

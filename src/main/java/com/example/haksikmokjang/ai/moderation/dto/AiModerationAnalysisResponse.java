@@ -2,6 +2,7 @@ package com.example.haksikmokjang.ai.moderation.dto;
 
 import com.example.haksikmokjang.ai.moderation.domain.AiModerationAnalysis;
 import com.example.haksikmokjang.ai.moderation.domain.AiProcessingStatus;
+import com.example.haksikmokjang.ai.moderation.domain.AutoHideBasis;
 import com.example.haksikmokjang.ai.moderation.domain.ModerationCategory;
 import com.example.haksikmokjang.ai.moderation.domain.ModerationDecision;
 import lombok.Builder;
@@ -27,6 +28,7 @@ public class AiModerationAnalysisResponse {
     private String modelName;
     private String policyVersion;
     private boolean ruleMatched;
+    private AutoHideBasis autoHideBasis;
     private LocalDateTime analyzedAt;
     private LocalDateTime restoredAt;
     private String restoreReason;
@@ -45,6 +47,7 @@ public class AiModerationAnalysisResponse {
                 .modelName(analysis.getModelName())
                 .policyVersion(analysis.getPolicyVersion())
                 .ruleMatched(analysis.isRuleMatched())
+                .autoHideBasis(analysis.getAutoHideBasis())
                 .analyzedAt(analysis.getAnalyzedAt())
                 .restoredAt(analysis.getRestoredAt())
                 .restoreReason(analysis.getRestoreReason())

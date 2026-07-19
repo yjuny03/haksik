@@ -11,13 +11,14 @@
 
     <div class="data-card">
 
-        <div class="filter-bar">
+        <div class="filter-bar admin-filter-panel">
             <select class="filter-input" id="statusFilter" onchange="fetchReports(0)">
                 <option value="ALL">전체 상태</option>
-                <option value="PENDING">대기</option>
-                <option value="PROCESSING">처리중</option>
-                <option value="RESOLVED">처리완료</option>
-                <option value="REJECTED">반려</option>
+                <option value="PENDING">접수됨</option>
+                <option value="PROCESSING">처리 중</option>
+                <option value="RESOLVED">처리 완료</option>
+                <option value="REJECTED">반려됨</option>
+                <option value="CANCELED">취소됨</option>
             </select>
 
             <select class="filter-input" id="targetTypeFilter" onchange="fetchReports(0)">
@@ -41,18 +42,15 @@
         </div>
 
         <div class="table-scroll">
-            <table class="data-table">
+            <table class="data-table admin-table">
                 <thead>
                 <tr>
                     <th>신고번호</th>
-                    <th>신고자</th>
-                    <th>대상</th>
-                    <th>대상번호</th>
-                    <th>동일 대상 신고</th>
-                    <th>사유</th>
+                    <th>신고 대상</th>
+                    <th>신고 유형</th>
+                    <th>판정 결과</th>
                     <th>상태</th>
-                    <th>처리자</th>
-                    <th>처리일시</th>
+                    <th>접수 시간</th>
                     <th>상세</th>
                     <th>처리</th>
                 </tr>

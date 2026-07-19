@@ -5,7 +5,9 @@ import com.example.haksikmokjang.admin.report.dto.AdminReportCancelRequest;
 import com.example.haksikmokjang.admin.report.dto.AdminReportDetailResponse;
 import com.example.haksikmokjang.admin.report.dto.AdminReportListResponse;
 import com.example.haksikmokjang.admin.report.dto.AdminReportProcessRequest;
+import com.example.haksikmokjang.admin.report.dto.ReportRelatedActionItemResponse;
 import com.example.haksikmokjang.admin.report.repository.ReportProcessHistoryRepository;
+import com.example.haksikmokjang.admin.report.repository.ReportRelatedActionItemRepository;
 import com.example.haksikmokjang.ai.moderation.dto.AiModerationAnalysisResponse;
 import com.example.haksikmokjang.ai.moderation.repository.AiModerationAnalysisRepository;
 import com.example.haksikmokjang.fileattachment.dto.FileAttachmentResponse;
@@ -21,6 +23,7 @@ import com.example.haksikmokjang.notification.service.NotificationService;
 import com.example.haksikmokjang.report.domain.Report;
 import com.example.haksikmokjang.report.domain.ReportStatus;
 import com.example.haksikmokjang.report.domain.ReportProcessorType;
+import com.example.haksikmokjang.report.repository.ReportContextSnapshotRepository;
 import com.example.haksikmokjang.report.repository.ReportRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -47,7 +50,10 @@ public class AdminReportService {
     private final TrustService trustService;
     private final FileAttachmentRepository fileAttachmentRepository;
     private final ReportProcessHistoryRepository reportProcessHistoryRepository;
+    private final ReportRelatedActionItemRepository reportRelatedActionItemRepository;
+    private final ReportRelatedActionService reportRelatedActionService;
     private final AiModerationAnalysisRepository aiModerationAnalysisRepository;
+    private final ReportContextSnapshotRepository reportContextSnapshotRepository;
 
     // 신고 목록 검색 페이지 조회
     public PageResponse<AdminReportListResponse> findReports(
@@ -130,9 +136,22 @@ public class AdminReportService {
                 .map(AiModerationAnalysisResponse::from)
                 .orElse(null);
 
+        String contextSnapshotJson = reportContextSnapshotRepository.findByReport(report)
+                .map(snapshot -> snapshot.getSnapshotJson())
+                .orElse(null);
+
         return detail
                 .withAttachments(findTargetAttachments(report))
-                .withAiAnalysis(aiAnalysis);
+                .withAiAnalysis(aiAnalysis)
+                .withContextSnapshotJson(contextSnapshotJson)
+                .withRelatedActionItems(findRelatedActionItems(report));
+    }
+
+    private List<ReportRelatedActionItemResponse> findRelatedActionItems(Report report) {
+        return reportRelatedActionItemRepository.findByReportIdOrderByIdAsc(report.getReportId())
+                .stream()
+                .map(ReportRelatedActionItemResponse::from)
+                .toList();
     }
 
     // 신고 대상 첨부파일 조회
@@ -354,6 +373,7 @@ public class AdminReportService {
 
         if (report.getStatus() == ReportStatus.RESOLVED) {
             restoreReportedTarget(report, history);
+            reportRelatedActionService.restoreRelatedItems(report.getReportId());
 
             // AI 자동 처리는 회원 제재를 만들지 않는다. 실제 제재 이력이 있는 수동 처리만 복구한다.
             if (history.getPenaltyHistory() != null) {

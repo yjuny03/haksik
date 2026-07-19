@@ -1,14 +1,17 @@
 package com.example.haksikmokjang.ai.moderation.service;
 
 import com.example.haksikmokjang.ai.moderation.domain.ModerationCategory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
+@Slf4j
 public class ModerationRuleValidationService {
 
     private static final Pattern URL_PATTERN = Pattern.compile("(?i)https?://\\S+|www\\.\\S+");
@@ -20,6 +23,8 @@ public class ModerationRuleValidationService {
     private static final Pattern REPEATED_TOKEN_PATTERN = Pattern.compile("(?i)(?<!\\S)(\\S{2,})(?:\\s+\\1){3,}(?!\\S)");
     private static final Pattern REPEATED_PHRASE_PATTERN = Pattern.compile("(?i)(.{4,30}?)(?:[.!?~\\s]+\\1){2,}");
     private static final Pattern REPEATED_CHARACTER_PATTERN = Pattern.compile("(.)\\1{7,}");
+    private static final Pattern REPORTED_TARGET_MARKER = Pattern.compile("(?im)^\\s*reported_target\\s*:");
+    private static final Pattern CONTEXT_MARKER = Pattern.compile("(?im)^\\s*context\\s*:");
 
     private static final List<String> COMMERCIAL_TERMS = List.of(
             "구매", "특가", "오늘만", "할인", "이벤트", "가입", "지급", "클릭", "무료", "수익", "한정",
@@ -30,23 +35,46 @@ public class ModerationRuleValidationService {
             "텔레그램", "오픈채팅", "선착순", "오늘만", "지금 클릭"
     );
     private static final List<String> ABUSE_TERMS = List.of(
-            "바보", "멍청이", "병신", "개새끼", "씨발", "죽어"
+            "바보", "멍청이", "병신", "개병신", "개새끼", "씨발", "미친놈", "미친년", "꺼져", "죽어", "한심하다"
     );
     private static final List<String> SEVERE_ABUSE_TERMS = List.of(
-            "병신", "개새끼", "씨발", "죽어"
+            "병신", "개병신", "개새끼", "씨발", "미친놈", "미친년", "꺼져", "죽어"
+    );
+    private static final List<String> RELATED_ABUSE_TERMS = List.of(
+            "병신", "개병신", "시발련", "시발련아", "씨발련", "씨발련아", "개새끼", "꺼져",
+            "처먹어라", "신고나 처먹어라", "ㅇㅈㄹ", "지랄", "한심하다"
+    );
+    private static final List<String> SEXUAL_HARASSMENT_TERMS = List.of(
+            "섹스하자", "자자", "따먹", "박고", "빨아", "벗어", "만져", "보지", "자지", "꼴리",
+            "가슴", "엉덩이", "몸매", "성희롱"
+    );
+    private static final List<String> SEVERE_SEXUAL_HARASSMENT_TERMS = List.of(
+            "섹스하자", "따먹", "박고", "빨아", "벗어", "만져", "보지", "자지", "꼴리"
     );
     private static final List<String> TARGET_TERMS = List.of(
-            "너", "네가", "니가", "당신", "저 사람", "저놈", "저년", "@"
+            "너", "넌", "너는", "너를", "너한테", "너에게", "너희",
+            "네가", "니", "니가", "니는", "니를", "니한테",
+            "당신", "글쓴이", "작성자", "상대방", "저 사람", "저놈", "저년", "@"
     );
     private static final List<String> CONTEXT_EXCLUSION_TERMS = List.of(
             "라고 말했다", "라고 했", "라고 욕", "욕설 예시", "교육 목적", "신고합니다", "신고했", "피해 내용",
-            "피해를 입", "들었습니다", "장난", "인용", "표현입니다", "욕을 먹"
+            "피해를 입", "들었습니다", "들었어요", "했습니다", "했어요", "장난", "농담", "자기표현",
+            "인용", "표현입니다", "욕을 먹", "예시"
+    );
+    private static final List<String> SEXUAL_CONTEXT_EXCLUSION_TERMS = List.of(
+            "성희롱 예시", "성적 발언 예시", "교육 목적", "신고합니다", "신고했", "피해 내용",
+            "피해를 입", "들었습니다", "들었어요", "했습니다", "했어요", "장난", "농담", "자기표현",
+            "인용", "표현입니다", "예시"
     );
     private static final List<String> THIRD_PARTY_CONTEXT_TERMS = List.of(
             "이 사람", "저 사람", "그 사람", "남의", "타인"
     );
     private static final List<String> MALICIOUS_DISCLOSURE_TERMS = List.of(
             "신상", "공개한다", "공개합니다", "퍼뜨려", "유포"
+    );
+    private static final List<String> PERSONAL_INFO_EXCLUSION_TERMS = List.of(
+            "제 번호", "내 번호", "제 연락처", "내 연락처", "제 이메일", "내 이메일",
+            "문의", "예약", "상담", "영업", "가게", "매장", "사업자", "대표번호", "고객센터"
     );
 
     public RuleEvidence inspect(String rawContent) {
@@ -72,10 +100,15 @@ public class ModerationRuleValidationService {
                 || REPEATED_PHRASE_PATTERN.matcher(content).find()
                 || REPEATED_CHARACTER_PATTERN.matcher(content).find();
         boolean abuse = containsAny(normalized, ABUSE_TERMS);
+        boolean sexualHarassment = containsAny(normalized, SEXUAL_HARASSMENT_TERMS);
         boolean target = containsAny(normalized, TARGET_TERMS);
         boolean severeTerm = containsAny(normalized, SEVERE_ABUSE_TERMS);
         boolean excludedContext = containsAny(normalized, CONTEXT_EXCLUSION_TERMS);
         boolean severeAbuse = abuse && severeTerm && target && !excludedContext;
+        boolean severeSexualHarassment = sexualHarassment
+                && containsAny(normalized, SEVERE_SEXUAL_HARASSMENT_TERMS)
+                && target
+                && !containsAny(normalized, SEXUAL_CONTEXT_EXCLUSION_TERMS);
 
         return new RuleEvidence(
                 spam,
@@ -85,21 +118,71 @@ public class ModerationRuleValidationService {
                 flooding,
                 abuse,
                 severeAbuse,
+                sexualHarassment,
+                severeSexualHarassment,
                 target,
                 excludedContext,
+                containsAny(normalized, SEXUAL_CONTEXT_EXCLUSION_TERMS),
+                containsAny(normalized, PERSONAL_INFO_EXCLUSION_TERMS),
                 List.copyOf(personalInfoTypes)
         );
     }
 
     public boolean matches(ModerationCategory category, String content) {
-        RuleEvidence evidence = inspect(content);
-        return switch (category) {
+        return inspectForCategory(category, content).ruleMatched();
+    }
+
+    public CategoryRuleEvidence inspectForCategory(ModerationCategory category, String content) {
+        RuleEvidence evidence = inspect(contentForRuleValidation(category, content));
+        boolean ruleMatched = switch (category) {
             case SPAM_AD -> evidence.spamAutoHideMatched();
             case PERSONAL_INFO -> evidence.personalInfoAutoHideMatched();
             case FLOODING -> evidence.floodingMatched();
             case ABUSE -> evidence.severeAbuseMatched();
+            case SEXUAL_HARASSMENT -> evidence.severeSexualHarassmentMatched();
             default -> false;
         };
+        boolean exclusionMatched = switch (category) {
+            case ABUSE -> evidence.contextExcluded();
+            case SEXUAL_HARASSMENT -> evidence.sexualContextExcluded();
+            case PERSONAL_INFO -> evidence.personalInfoContextExcluded();
+            default -> false;
+        };
+        return new CategoryRuleEvidence(ruleMatched, exclusionMatched, evidence.targetMatched());
+    }
+
+    public boolean exclusionMatched(ModerationCategory category, String content) {
+        return inspectForCategory(category, content).exclusionMatched();
+    }
+
+    public boolean targetMatched(ModerationCategory category, String content) {
+        return inspectForCategory(category, content).targetMatched();
+    }
+
+    public boolean spamContextMatched(String content) {
+        RuleEvidence evidence = inspect(content);
+        return evidence.spamMatched() || evidence.spamAutoHideMatched();
+    }
+
+    public boolean spamRelatedMessageCandidate(String content) {
+        String value = content == null ? "" : content;
+        String normalized = value.toLowerCase(Locale.ROOT);
+        return URL_PATTERN.matcher(value).find()
+                || containsAny(normalized, HIGH_RISK_SPAM_TERMS)
+                || containsAny(normalized, List.of(
+                "오픈채팅", "텔레그램", "수익", "입금", "출금", "원금", "가입", "지급", "리딩방", "투자"
+        ));
+    }
+
+    public boolean floodingMessageMatched(String content) {
+        return inspect(content).floodingMatched();
+    }
+
+    public boolean abuseRelatedMessageCandidate(String content) {
+        String value = content == null ? "" : content;
+        String normalized = value.toLowerCase(Locale.ROOT);
+        RuleEvidence evidence = inspect(value);
+        return containsAny(normalized, RELATED_ABUSE_TERMS) && !evidence.contextExcluded();
     }
 
     private boolean containsAny(String content, List<String> terms) {
@@ -110,6 +193,48 @@ public class ModerationRuleValidationService {
         return terms.stream().filter(content::contains).count();
     }
 
+    private String contentForRuleValidation(ModerationCategory category, String content) {
+        return switch (category) {
+            case ABUSE, SEXUAL_HARASSMENT -> extractReportedTarget(content);
+            default -> content;
+        };
+    }
+
+    private String extractReportedTarget(String content) {
+        if (content == null || content.isBlank()) {
+            return content;
+        }
+
+        Matcher reportedTargetMatcher = REPORTED_TARGET_MARKER.matcher(content);
+        if (!reportedTargetMatcher.find()) {
+            return content;
+        }
+
+        int start = reportedTargetMatcher.end();
+        Matcher contextMatcher = CONTEXT_MARKER.matcher(content);
+        if (contextMatcher.find(start)) {
+            String extracted = content.substring(start, contextMatcher.start()).trim();
+            return fallbackIfBlank(content, extracted);
+        }
+        String extracted = content.substring(start).trim();
+        return fallbackIfBlank(content, extracted);
+    }
+
+    private String fallbackIfBlank(String originalContent, String extractedContent) {
+        if (extractedContent != null && !extractedContent.isBlank()) {
+            return extractedContent;
+        }
+        log.warn("[AI-REPORT] reported_target 추출 결과가 비어 있어 전체 content로 서버 규칙 검사를 fallback합니다.");
+        return originalContent;
+    }
+
+    public record CategoryRuleEvidence(
+            boolean ruleMatched,
+            boolean exclusionMatched,
+            boolean targetMatched
+    ) {
+    }
+
     public record RuleEvidence(
             boolean spamMatched,
             boolean spamAutoHideMatched,
@@ -118,8 +243,12 @@ public class ModerationRuleValidationService {
             boolean floodingMatched,
             boolean abuseMatched,
             boolean severeAbuseMatched,
+            boolean sexualHarassmentMatched,
+            boolean severeSexualHarassmentMatched,
             boolean targetMatched,
             boolean contextExcluded,
+            boolean sexualContextExcluded,
+            boolean personalInfoContextExcluded,
             List<String> personalInfoTypes
     ) {
     }
