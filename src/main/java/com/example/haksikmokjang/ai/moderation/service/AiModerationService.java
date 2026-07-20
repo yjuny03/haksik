@@ -3,6 +3,7 @@ package com.example.haksikmokjang.ai.moderation.service;
 import com.example.haksikmokjang.admin.report.service.AdminReportService;
 import com.example.haksikmokjang.admin.report.service.ReportRelatedActionService;
 import com.example.haksikmokjang.ai.client.AiClient;
+import com.example.haksikmokjang.ai.client.AiProviderQuotaExceededException;
 import com.example.haksikmokjang.ai.moderation.domain.AiModerationAnalysis;
 import com.example.haksikmokjang.ai.moderation.domain.AiProcessingStatus;
 import com.example.haksikmokjang.ai.moderation.domain.AutoHideBasis;
@@ -214,11 +215,7 @@ public class AiModerationService {
             log.info("[AI-REPORT] autoResolveReport 호출 직후 reportId={} reportStatus={}", reportId, report.getStatus());
 
             stage = "RELATED_ACTION_HIDE";
-            int relatedHiddenCount = reportRelatedActionService.hideRelatedItemsAfterAiAutoProcess(
-                    report,
-                    result,
-                    autoHideBasis
-            );
+            int relatedHiddenCount = hideRelatedItemsSafely(report, result, autoHideBasis);
             if (relatedHiddenCount > 0) {
                 log.info(
                         "[AI-REPORT] 관련 메시지 함께 블라인드 완료 reportId={} relatedHiddenCount={}",
@@ -249,6 +246,18 @@ public class AiModerationService {
             );
 
             log.info("[AI-REPORT] analyzeReport 정상 종료 reportId={} result=AUTO_PROCESSED", reportId);
+        } catch (AiProviderQuotaExceededException exception) {
+            log.warn(
+                    "[AI-REPORT] analyzeReport AI quota exceeded reportId={} stage={} exceptionType={}",
+                    reportId,
+                    stage,
+                    exception.getClass().getSimpleName()
+            );
+            if (report != null && report.getStatus() == ReportStatus.PENDING) {
+                markFailedAndNotify(report, AiProviderQuotaExceededException.USER_MESSAGE);
+                return;
+            }
+            throw exception;
         } catch (RuntimeException exception) {
             log.error(
                     "[AI-REPORT] analyzeReport 예외 발생 reportId={} stage={} exceptionType={} message={}",
@@ -259,10 +268,36 @@ public class AiModerationService {
                     exception
             );
             if (report != null && report.getStatus() == ReportStatus.PENDING) {
-                markFailedAndNotify(report, exception);
+                markFailedAndNotify(report, "AI 분석을 완료하지 못해 관리자 검토가 필요합니다.");
                 return;
             }
             throw exception;
+        }
+    }
+
+    private int hideRelatedItemsSafely(
+            Report report,
+            ModerationResult result,
+        AutoHideBasis autoHideBasis
+    ) {
+        try {
+            report.getReporter().getMemberId();
+            return reportRelatedActionService.hideRelatedItemsAfterAiAutoProcess(
+                    report,
+                    result,
+                    autoHideBasis
+            );
+        } catch (RuntimeException exception) {
+            log.error(
+                    "[AI-REPORT] related hide failed but target auto process remains reportId={} targetType={} category={} exceptionType={} message={}",
+                    report.getReportId(),
+                    report.getTargetType(),
+                    result.category(),
+                    exception.getClass().getSimpleName(),
+                    exception.getMessage(),
+                    exception
+            );
+            return 0;
         }
     }
 
@@ -414,10 +449,9 @@ public class AiModerationService {
         );
     }
 
-    private void markFailedAndNotify(Report report, RuntimeException exception) {
-        String reason = "AI 신고 분석 실패: " + exception.getClass().getSimpleName();
+    private void markFailedAndNotify(Report report, String reason) {
         if (!analysisRepository.existsByReport(report)) {
-            analysisRepository.save(AiModerationAnalysis.failed(report, reason, "mock-moderation-v1"));
+            analysisRepository.save(AiModerationAnalysis.failed(report, reason, "AI_PROVIDER"));
         }
         notifyAdmins(
                 report.getReportId(),

@@ -1,10 +1,13 @@
 package com.example.haksikmokjang.ai.moderation;
 
 import com.example.haksikmokjang.admin.report.service.AdminReportService;
+import com.example.haksikmokjang.admin.report.service.ReportRelatedActionService;
 import com.example.haksikmokjang.ai.client.AiClient;
+import com.example.haksikmokjang.ai.client.AiProviderQuotaExceededException;
 import com.example.haksikmokjang.ai.client.MockAiClient;
 import com.example.haksikmokjang.ai.moderation.domain.AiModerationAnalysis;
 import com.example.haksikmokjang.ai.moderation.domain.AiProcessingStatus;
+import com.example.haksikmokjang.ai.moderation.domain.AutoHideBasis;
 import com.example.haksikmokjang.ai.moderation.domain.ModerationCategory;
 import com.example.haksikmokjang.ai.moderation.domain.ModerationDecision;
 import com.example.haksikmokjang.ai.moderation.dto.ModerationResult;
@@ -53,6 +56,7 @@ class AiModerationNotificationTest {
     @Mock private ModerationPolicyService policyService;
     @Mock private AiClient aiClient;
     @Mock private AdminReportService adminReportService;
+    @Mock private ReportRelatedActionService reportRelatedActionService;
     @Mock private MemberRepository memberRepository;
     @Mock private NotificationService notificationService;
     @Mock private Report report;
@@ -67,7 +71,7 @@ class AiModerationNotificationTest {
         service = new AiModerationService(
                 reportRepository, analysisRepository, targetContentService,
                 ruleService, policyService, aiClient, adminReportService,
-                memberRepository, notificationService
+                reportRelatedActionService, memberRepository, notificationService
         );
         when(reportRepository.findById(123L)).thenReturn(Optional.of(report));
         when(report.getReportId()).thenReturn(123L);
@@ -88,8 +92,9 @@ class AiModerationNotificationTest {
                 new ModerationTargetContentService.TargetContentSnapshot("고수익 링크", true, false)
         );
         when(aiClient.analyzeModeration(any())).thenReturn(result);
-        when(ruleService.matches(ModerationCategory.SPAM_AD, "고수익 링크")).thenReturn(true);
-        when(policyService.canAutoHide(result, true)).thenReturn(true);
+        when(ruleService.inspectForCategory(ModerationCategory.SPAM_AD, "고수익 링크"))
+                .thenReturn(new ModerationRuleValidationService.CategoryRuleEvidence(true, false, false));
+        when(policyService.canAutoHide(result, true, false, false)).thenReturn(true);
         when(adminReportService.autoResolveReport(eq(123L), anyString()))
                 .thenReturn(new AdminReportService.AiAutoResolveResult(writer));
 
@@ -114,8 +119,9 @@ class AiModerationNotificationTest {
         when(targetContentService.getSnapshot(report)).thenReturn(
                 new ModerationTargetContentService.TargetContentSnapshot("이미지", false, true)
         );
-        when(ruleService.matches(ModerationCategory.OTHER, "이미지")).thenReturn(false);
-        when(policyService.canAutoHide(any(), eq(false))).thenReturn(false);
+        when(ruleService.inspectForCategory(ModerationCategory.OTHER, "이미지"))
+                .thenReturn(new ModerationRuleValidationService.CategoryRuleEvidence(false, false, false));
+        when(policyService.canAutoHide(any(), eq(false), eq(false), eq(false))).thenReturn(false);
 
         service.analyzeReport(123L);
 
@@ -143,8 +149,9 @@ class AiModerationNotificationTest {
                 new ModerationTargetContentService.TargetContentSnapshot("분석할 텍스트", true, true)
         );
         when(aiClient.analyzeModeration(any())).thenReturn(result);
-        when(ruleService.matches(ModerationCategory.OTHER, "분석할 텍스트")).thenReturn(false);
-        when(policyService.canAutoHide(result, false)).thenReturn(false);
+        when(ruleService.inspectForCategory(ModerationCategory.OTHER, "분석할 텍스트"))
+                .thenReturn(new ModerationRuleValidationService.CategoryRuleEvidence(false, false, false));
+        when(policyService.canAutoHide(result, false, false, false)).thenReturn(false);
 
         service.analyzeReport(123L);
 
@@ -178,14 +185,47 @@ class AiModerationNotificationTest {
     }
 
     @Test
+    void quotaExceededSavesAiFailedAndKeepsReportPendingForAdminReview() {
+        when(targetContentService.getSnapshot(report)).thenReturn(
+                new ModerationTargetContentService.TargetContentSnapshot("분석 대상", true, false)
+        );
+        when(aiClient.analyzeModeration(any())).thenThrow(new AiProviderQuotaExceededException());
+        when(analysisRepository.save(any(AiModerationAnalysis.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.analyzeReport(123L);
+
+        ArgumentCaptor<AiModerationAnalysis> captor = ArgumentCaptor.forClass(AiModerationAnalysis.class);
+        verify(analysisRepository).save(captor.capture());
+        AiModerationAnalysis analysis = captor.getValue();
+        assertThat(analysis.getProcessingStatus()).isEqualTo(AiProcessingStatus.FAILED);
+        assertThat(analysis.getAutoHideBasis()).isEqualTo(AutoHideBasis.AI_FAILED);
+        assertThat(analysis.getReasonSummary()).isEqualTo(AiProviderQuotaExceededException.USER_MESSAGE);
+        assertThat(analysis.getModelName()).isEqualTo("AI_PROVIDER");
+        assertThat(report.getStatus()).isEqualTo(ReportStatus.PENDING);
+
+        verify(adminReportService, never()).autoResolveReport(any(), anyString());
+        verify(reportRelatedActionService, never()).hideRelatedItemsAfterAiAutoProcess(any(), any(), any());
+        verify(notificationService).sendNotification(
+                eq(admin), eq("ADMIN_AI_FAILED"), contains("수동 검토"),
+                contains(AiProviderQuotaExceededException.USER_MESSAGE), eq("ADMIN_REPORT"), eq(123L)
+        );
+        verify(notificationService).sendNotification(
+                eq(reporter), eq("REPORT"), eq("신고 검토 중"),
+                contains("정상 접수"), eq("REPORT"), eq(123L)
+        );
+    }
+
+    @Test
     void autoHideIsDowngradedWhenServerRuleDoesNotMatch() {
         ModerationResult result = autoHideResult();
         when(targetContentService.getSnapshot(report)).thenReturn(
                 new ModerationTargetContentService.TargetContentSnapshot("일반 문장", true, false)
         );
         when(aiClient.analyzeModeration(any())).thenReturn(result);
-        when(ruleService.matches(ModerationCategory.SPAM_AD, "일반 문장")).thenReturn(false);
-        when(policyService.canAutoHide(any(), eq(false))).thenReturn(false);
+        when(ruleService.inspectForCategory(ModerationCategory.SPAM_AD, "일반 문장"))
+                .thenReturn(new ModerationRuleValidationService.CategoryRuleEvidence(false, false, false));
+        when(policyService.canAutoHide(any(), eq(false), eq(false), eq(false))).thenReturn(false);
 
         service.analyzeReport(123L);
 

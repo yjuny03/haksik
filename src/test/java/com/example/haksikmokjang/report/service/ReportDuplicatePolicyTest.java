@@ -49,6 +49,7 @@ class ReportDuplicatePolicyTest {
     @Mock private StoreReviewRepository storeReviewRepository;
     @Mock private MemberRepository memberRepository;
     @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private ReportContextSnapshotService reportContextSnapshotService;
     @Mock private Member writer;
     @Mock private Member firstReporter;
     @Mock private Member secondReporter;
@@ -62,7 +63,7 @@ class ReportDuplicatePolicyTest {
         service = new ReportService(
                 reportRepository, userProfileRepository, postRepository, commentRepository,
                 chatRoomRepository, chatRoomMemberRepository, chatMessageRepository,
-                storeReviewRepository, memberRepository, eventPublisher
+                storeReviewRepository, memberRepository, eventPublisher, reportContextSnapshotService
         );
         post = Post.builder().member(writer).title("신고 대상").content("내용").anonymousYn("N").build();
         request = new ReportRequest();

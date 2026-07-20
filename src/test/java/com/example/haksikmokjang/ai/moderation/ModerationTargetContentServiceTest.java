@@ -9,6 +9,7 @@ import com.example.haksikmokjang.fileattachment.domain.FileAttachment;
 import com.example.haksikmokjang.fileattachment.repository.FileAttachmentRepository;
 import com.example.haksikmokjang.ownerpage.store.repository.StoreReviewRepository;
 import com.example.haksikmokjang.report.domain.Report;
+import com.example.haksikmokjang.report.repository.ReportContextSnapshotRepository;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -29,7 +30,8 @@ class ModerationTargetContentServiceTest {
                 mock(CommentRepository.class),
                 mock(ChatMessageRepository.class),
                 mock(StoreReviewRepository.class),
-                attachmentRepository
+                attachmentRepository,
+                mock(ReportContextSnapshotRepository.class)
         );
         Post post = Post.builder().title("사진 신고").content(" ").anonymousYn("N").build();
         Report report = mock(Report.class);
