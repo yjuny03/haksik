@@ -1,7 +1,7 @@
 # 학식목장 서비스 운영 기준 문서
 
 작성 기준: 실제 코드 기준  
-작성일: 2026-07-12
+작성일: 2026-07-21
 
 이 문서는 팀원이 학식목장 서비스의 동작 기준, 상태값, 판단 근거를 빠르게 이해하기 위한 인수인계 문서입니다. 코드와 기존 문서/화면 문구가 다르면 코드 기준으로 작성했습니다.
 
@@ -14,16 +14,17 @@
 
 | 단계 | 사용자가 보는 흐름 | 서버 기준 핵심 객체 | 주요 코드 |
 |---|---|---|---|
-| 1 | 로그인 | `Member`, `UserProfile`, `OwnerProfile` | `SecurityConfig`, `LoginSuccessHandler` |
-| 2 | 지도에서 주변 대기자 확인 | `MemberLocation`, `MatchingWaiting` | `MatchingWaitingService` |
-| 3 | 매칭 요청/수락 | `MatchingRequest`, `MatchingStatus` | `MatchingRequestService` |
-| 4 | 채팅방 입장 | `ChatRoom`, `ChatRoomMember` | `ChatRoomCreateService`, `ChatRoomService` |
-| 5 | AI 식당 추천 | `Store`, `Menu`, `StoreReview`, 추천 DTO | `RestaurantRecommendationService` |
-| 6 | 장소 후보 추가 | `ChatForm`, `ChatFormOption` | `ChatFormService.addOption` |
-| 7 | 약속 폼 투표/확정 | `ChatFormAnswer`, `Reservation` | `ChatFormService.closeForm`, `ReservationService` |
+| 1 | 회원가입/로그인 | `Member`, `UserProfile`, `OwnerProfile`, `TermsAgreement` | `UserSignupService`, `OwnerSignupService`, `SecurityConfig`, `LoginSuccessHandler` |
+| 2 | 일반 사용자/점주/관리자 역할 분기 | `MemberRole`, `ApprovalStatus`, `lockedYn` | `LoginSuccessHandler`, `AdminMemberService` |
+| 3 | 지도에서 주변 대기자 확인 | `MemberLocation`, `MatchingWaiting` | `MatchingWaitingService` |
+| 4 | 매칭 요청/수락 | `MatchingRequest`, `MatchingStatus` | `MatchingRequestService` |
+| 5 | 채팅방 입장/메시지 송수신 | `ChatRoom`, `ChatRoomMember`, `ChatMessage` | `ChatRoomCreateService`, `ChatRoomService`, `ChatMessageService` |
+| 6 | 약속 폼 생성/장소 후보 추가 | `ChatForm`, `ChatFormOption` | `ChatFormService.addOption` |
+| 7 | 약속 폼 투표/확정/예약 | `ChatFormAnswer`, `Reservation` | `ChatFormService.closeForm`, `ReservationService` |
 | 8 | 채팅방 종료 후 리뷰 | `ChatReview`, `StoreReview` | `ChatReviewService`, `ReviewService` |
-| 9 | 신고 접수 | `Report` | `ReportService` |
-| 10 | AI 분석/관리자 처리/복구 | `AiModerationAnalysis`, `ReportProcessHistory`, `TrustPenaltyHistory` | `AiModerationService`, `AdminReportService`, `TrustService` |
+| 9 | 커뮤니티 게시글/댓글 | `Post`, `Comment`, `FileAttachment` | `PostService`, `CommentService` |
+| 10 | 신고 접수/snapshot 저장 | `Report`, `ReportContextSnapshot` | `ReportService`, `ReportContextSnapshotService` |
+| 11 | AI 분석/자동 처리/관련 항목 블라인드/복구 | `AiModerationAnalysis`, `ReportRelatedActionItem`, `ReportProcessHistory`, `TrustPenaltyHistory` | `AiModerationService`, `ReportRelatedActionService`, `AdminReportService`, `TrustService` |
 
 ### 0.3 AI가 사용되는 위치
 
@@ -40,7 +41,9 @@
 |---|---|---|
 | DB에 없는 가게/메뉴는 추천하지 않음 | `RestaurantCandidateQueryService`, `GeminiRestaurantRecommendationClient.toValidatedGeminiItem` | 추천 결과를 바로 장소 후보로 추가할 수 있어야 하므로 실제 `storeId/menuId`가 필요합니다. |
 | CLOSED 가게와 ON_SALE 메뉴 없는 가게는 추천 제외 | `businessStatus != CLOSED`, `MenuStatus.ON_SALE` | 사용자가 선택 가능한 실제 후보만 노출합니다. |
-| 신고 자동 처리는 보수적으로 수행 | `ModerationPolicyService.canAutoHide`, `ModerationRuleValidationService.matches` | 신고 처리는 숨김/제재와 연결되므로 ruleMatched와 높은 점수 조건이 필요합니다. |
+| 신고 자동 처리는 보수적으로 수행 | `ModerationPolicyService.canAutoHide`, `ModerationRuleValidationService.inspectForCategory` | `decision=AUTO_HIDE`가 필수이고, 서버 규칙 일치 또는 AI 고확신 기준 중 하나를 만족해야 합니다. `REVIEW_REQUIRED`는 서버가 자동 숨김으로 올리지 않습니다. |
+| 관련 항목 함께 블라인드는 신고 대상 자동 처리 뒤에만 수행 | `ReportRelatedActionService`, `ReportRelatedActionItem` | 채팅/댓글의 같은 작성자 관련 위반 항목만 추가 숨김하고, 매너온도와 알림은 신고 대상 1건 기준으로만 처리합니다. |
+| AI 실패와 quota 초과는 자동 처리하지 않음 | `GeminiAiClient`, `AiProviderQuotaExceededException`, `AiModerationAnalysis.failed` | Gemini 429 또는 분석 실패는 `AI_FAILED`로 남기고 신고를 `PENDING` 상태로 유지해 관리자가 직접 처리할 수 있게 합니다. |
 | 복구 가능한 처리 이력을 남김 | `ReportProcessHistory`, `TrustPenaltyHistory` | 관리자 취소/복구 시 콘텐츠 상태와 매너온도를 되돌리기 위해 처리 전 값을 저장합니다. |
 | 시연 데이터는 운영에서 꺼야 함 | `dev.dummy-data.enabled=true` + `app.demo-mode=true` | 대량 더미 계정/신고/리뷰가 운영 데이터와 섞이는 것을 막습니다. |
 
@@ -58,6 +61,12 @@
 | AI 분석 이력 | 신고에 대해 AI가 내린 카테고리, 결정, 점수, 상태를 저장한 이력입니다. | `AiModerationAnalysis` |
 | 복구 | 처리된 신고를 취소해 게시글/댓글/채팅/리뷰 상태와 매너온도 패널티를 되돌리는 동작입니다. | `AdminReportService.cancelReport` |
 | 매너온도 | 사용자 신뢰도 점수입니다. 신고 제재나 노쇼로 감소하고, 처리 취소 시 복구될 수 있습니다. | `TrustService`, `TrustPenaltyHistory` |
+| `AUTO_HIDE` | AI가 자동 블라인드 후보로 판단한 결정값입니다. 서버 정책까지 통과해야 실제 자동 처리됩니다. | `ModerationDecision.AUTO_HIDE` |
+| `REVIEW_REQUIRED` | 관리자 검토가 필요하다는 결정값입니다. 서버가 이 값을 자동 숨김으로 승격하지 않습니다. | `ModerationDecision.REVIEW_REQUIRED` |
+| `AUTO_PROCESSED` | 신고 대상이 실제 자동 숨김 처리된 상태입니다. | `AiProcessingStatus.AUTO_PROCESSED` |
+| `AI_FAILED` | AI 호출/분석 실패 또는 quota 초과로 자동 분석을 완료하지 못한 상태입니다. | `AutoHideBasis.AI_FAILED` |
+| `SERVER_RULE_MATCHED` | 서버 규칙과 AI 결과가 함께 자동 처리 기준을 충족한 근거입니다. | `AutoHideBasis.SERVER_RULE_MATCHED` |
+| `AI_HIGH_CONFIDENCE` | 서버 규칙 직접 일치는 아니지만 AI 점수/증거/대상 조건이 고확신 기준을 충족한 근거입니다. | `AutoHideBasis.AI_HIGH_CONFIDENCE` |
 
 ### 0.6 역할별 가능 기능 표
 
@@ -100,6 +109,7 @@
 | 리뷰 가능 시간 문구 불일치 | 실제 코드는 예약시간부터 3일, 에러 메시지는 30분~4시간으로 되어 있습니다. | 사용자 안내와 실제 허용 시간이 다를 수 있습니다. | `ChatFormService.getStoreReviewTarget`, `ReviewService`, `ErrorCode.UNAUTHORIZED_REVIEW` |
 | AI 자동 처리 주석 불일치 | 주석은 회원 제재를 하지 않는다고 하지만 실제 코드는 AI 자동 처리 시 매너온도 5.0을 차감합니다. | 관리자/운영자가 AI 자동 처리의 패널티 여부를 오해할 수 있습니다. | `admin/report/service/AdminReportService.autoResolveReport`, `TrustService.applyAiReportPenalty` |
 | 추천 context 문자열 정합성 | enum은 `MAP/CHAT_PLACE/CHATBOT`이지만 챗봇은 `"PERSONAL_RECOMMENDATION"` 문자열을 전달합니다. | 현재 로직에는 큰 영향이 없지만 context 기반 분기 추가 시 누락될 수 있습니다. | `RestaurantRecommendationContext`, `ChatbotService`, `RestaurantRecommendationService` |
+| resource 제외 설정 부재 | `build.gradle.processResources`가 비어 있습니다. | local/secret 설정 파일이 산출물에 포함되지 않는지 배포 전 확인해야 합니다. | `build.gradle`, `application.properties` |
 
 ## 1. 서비스 전체 구조
 
@@ -174,6 +184,79 @@
 - `AccountStatus.ACTIVE/WITHDRAWN/SUSPENDED` enum은 존재하지만, 현재 `SecurityConfig`의 URL 권한 판단은 role 기반입니다.
 - `application.properties`에 `spring.profiles.active=local`, `spring.profiles.include=local`이 있습니다. 운영 배포 시 local profile 로딩 여부를 확인해야 합니다.
 
+### 2.11 일반 사용자 회원가입
+
+사용자가 하는 일: 학교 이메일로 인증번호를 받고, 아이디/이메일/닉네임 중복을 확인한 뒤 필수 약관에 동의하고 가입합니다.
+
+서버가 처리하는 일: 학교 이메일 도메인과 인증 완료 여부를 확인하고, `Member`와 `UserProfile`, 약관 동의 이력, 가입 기본 배지를 생성합니다.
+
+정상 결과: `MemberRole.USER`, `AccountStatus.ACTIVE`, 기본 매너온도 36.5의 일반 사용자 계정이 생성됩니다.
+
+문제가 생기면: 이메일 도메인 불일치, 인증 만료/코드 불일치, 필수 약관 미동의, 중복 아이디/이메일/닉네임이면 가입하지 않습니다.
+
+| 항목 | 실제 동작 | 결과 | 관련 코드 |
+|---|---|---|---|
+| 학교 목록 조회 | 별도 `SchoolController`/학교 목록 API는 현재 코드에서 확인되지 않음 | 학교는 이메일 인증 발송 시 도메인으로 식별 | `AuthService.findSchoolByEmailDomain`, `SchoolRepository` |
+| 학교 이메일 인증 발송 | 이메일 도메인으로 등록 학교를 찾고 6자리 인증번호 발송 | `EmailVerification` 저장, 만료 5분 | `AuthService.sendEmailVerification` |
+| 인증번호 검증 | 최신 `SIGNUP` 인증 기록의 코드/만료시간 확인 | `verifiedYn=N → Y` | `AuthService.verifyEmail` |
+| 아이디 중복 확인 | `Member.loginId` 존재 여부 | 사용 가능 여부 반환 | `UserSignupService.checkLoginId` |
+| 학교 이메일 중복 확인 | `Member.email` 존재 여부 | 사용 가능 여부 반환 | `checkSchoolEmail` |
+| 닉네임 중복 확인 | `UserProfile.nickname` 존재 여부 | 사용 가능 여부 반환 | `checkNickname` |
+| 약관 조회 | 약관을 최신 시행일 순으로 조회 | 가입 화면 약관 목록 | `TermsService.getTermsList` |
+| 필수 약관 검증 | `requiredYn=Y` 약관이 요청 `termsIds`에 모두 포함되어야 함 | 누락 시 가입 실패 | `validateRequiredTermsAgreed` |
+| 일반 사용자 가입 | 중복/학교/약관/이메일 인증 검증 후 저장 | `Member`, `UserProfile`, `TermsAgreement`, 기본 배지 생성 | `UserSignupService.signupUser` |
+
+### 2.12 점주 가입 신청/승인
+
+사용자가 하는 일: 점주가 아이디, 이메일, 사업자등록번호, 상호, 대표자명, 연락처를 입력해 가입 신청합니다.
+
+서버가 처리하는 일: 중복을 검증한 뒤 `OWNER` 계정과 `OwnerProfile`을 만들고 승인 상태를 `PENDING`으로 저장합니다. 관리자에게 승인 요청 알림도 생성합니다.
+
+정상 결과: 점주는 로그인할 수 있지만 승인 전에는 점주 메인 대신 승인 대기 화면으로 이동합니다. 관리자가 승인하면 점주 메인 접근이 가능합니다.
+
+문제가 생기면: 중복 아이디/이메일/사업자등록번호는 가입 실패, 반려된 점주는 로그인 세션이 무효화되고 반려 사유와 함께 로그인 화면으로 이동합니다.
+
+| 항목 | 실제 동작 | 결과 | 관련 코드 |
+|---|---|---|---|
+| 점주 중복 확인 | 로그인 ID, 이메일, 사업자등록번호 각각 확인 | 사용 가능 여부 반환 | `OwnerSignupService` |
+| 점주 가입 | `MemberRole.OWNER`, `AccountStatus.ACTIVE` 회원 생성 | `OwnerProfile.approvalStatus=PENDING` | `OwnerSignupService.signupOwner` |
+| 승인 대기 알림 | 점주 가입 완료 시 관리자 알림 이벤트 발행 | 관리자 알림 목록에 표시 | `ADMIN_OWNER_APPROVAL_PENDING` |
+| 관리자 승인 | `PENDING` 신청만 승인 가능 | `APPROVED`, 처리 관리자/시간 저장 | `AdminMemberService.approveOwner` |
+| 관리자 반려 | 반려 사유 필수 | `REJECTED`, 처리 관리자/시간/사유 저장 | `rejectOwner` |
+| 승인/반려 취소 | `PENDING`이 아닌 신청만 취소 가능 | `PENDING`으로 복귀 | `cancelOwnerApproval` |
+| 로그인 후 이동 | 승인 상태에 따라 점주 메인/대기/로그인 화면 분기 | 승인 전 접근 제한 | `LoginSuccessHandler` |
+
+### 2.13 마이페이지/계정 관리
+
+사용자가 하는 일: 내 프로필을 조회하고 닉네임, 학교, 학과, 선호 음식, 프로필 이미지를 바꾸거나 비밀번호를 변경합니다. 필요하면 회원 탈퇴를 요청합니다.
+
+서버가 처리하는 일: 로그인 회원의 `UserProfile`을 조회하고, 파일 업로드는 `FileAttachmentService`로 저장합니다. 탈퇴는 상태 변경이 아니라 관련 사용자 데이터를 삭제한 뒤 회원을 삭제합니다.
+
+정상 결과: 프로필 화면에는 이름, 닉네임, 학교, 학과, 로그인 ID, 이메일, 생년월일, 선호 음식, 프로필 이미지 URL이 표시됩니다.
+
+문제가 생기면: 닉네임 중복, 학교 없음, 현재 비밀번호 불일치, 새 비밀번호 8자 미만, 새 비밀번호 확인 불일치 시 변경하지 않습니다.
+
+| 항목 | 실제 동작 | 결과 | 관련 코드 |
+|---|---|---|---|
+| 내 프로필 조회 | 로그인 회원의 `UserProfile` 조회 | 마이페이지 DTO 반환 | `MyPageService.getMyPageInfo` |
+| 프로필 수정 | 닉네임/학과/선호 음식/이름/생년월일/학교 수정 | 이미지가 있으면 `USER_PROFILE` 파일 저장 | `UserProfileService.updateProfile` |
+| 선호 음식 변경 | 선호 음식 카테고리만 변경 | 추천 기준에 반영 | `updatePreferredFood` |
+| 비밀번호 변경 | 현재 비밀번호 확인, 새 비밀번호 길이/확인값 검증 | 암호화 후 DB update | `PasswordService.updatePassword` |
+| 비밀번호 재설정 | 이메일 인증 후 이메일 기준 회원 조회 | 기존 비밀번호와 같으면 거부 | `resetPassword` |
+| 회원 탈퇴 | 비밀번호 확인 후 프로필/위치/매칭 대기/첨부/약관/알림/배지 삭제 | `Member` hard delete | `UserService.withdrawImmediately` |
+| 내 알림/리뷰/예약 | 별도 화면 API로 조회 | 알림/리뷰/예약 목록 표시 | `NotificationService`, `ReviewService`, `ReservationService` |
+
+### 2.14 계정 상태와 잠금 기준
+
+| 상태/값 | 쉬운 설명 | 실제 사용 기준 | 관련 코드 |
+|---|---|---|---|
+| `AccountStatus.ACTIVE` | 정상 계정 | 가입 시 기본값 | `UserSignupService`, `OwnerSignupService` |
+| `AccountStatus.WITHDRAWN` | 탈퇴 상태 enum | 현재 일반 탈퇴는 상태 변경이 아니라 hard delete 방식 | `AccountStatus`, `UserService.withdrawImmediately` |
+| `AccountStatus.SUSPENDED` | 정지 상태 enum | URL 권한/로그인 분기는 현재 role과 `lockedYn` 중심 | `AccountStatus`, `SecurityConfig` |
+| `lockedYn=Y` | 로그인 제한 잠금 | 로그인 실패 5회 또는 매너온도 제재 잠금 | `Member`, `LoginAttemptService`, `TrustService` |
+| 로그인 실패 잠금 | 실패 5회 이상 | 30분 뒤 로그인 시도 시 자동 해제 가능 | `LoginAttemptService.unlockExpiredLoginFailLock` |
+| 신고 제재 잠금 | 관리자 신고 제재로 매너온도 0 이하 | 관리자가 잠금 해제하거나 제재 취소 시 복구 가능 | `TrustService.applyReportPenalty` |
+
 ## 3. 위치 기반 매칭 흐름
 
 ### 3.1 기능 목적
@@ -245,6 +328,8 @@
 ### 4.3 서버 처리 흐름
 `MatchingRequestService.acceptMatching`이 매칭 유형별로 채팅방을 생성합니다. `ChatFormService`가 폼 생성, 후보 추가, 투표, 종료, 예약 생성, 리뷰 가능 여부를 처리합니다.
 
+채팅 메시지는 REST 조회/전송 API와 WebSocket 이벤트를 함께 사용합니다. 목록 조회 시 마지막 메시지를 기준으로 읽음 상태를 갱신하고, WebSocket 읽음 이벤트도 `lastReadMessageId`를 저장합니다.
+
 ### 4.4 주요 클래스
 - `chat/chatroom/service/ChatRoomCreateService.java`
 - `chat/chatroom/service/ChatRoomService.java`
@@ -252,6 +337,9 @@
 - `chat/chatform/service/ChatFormService.java`
 - `chat/chatform/domain/ChatForm.java`
 - `chat/chatform/domain/ChatFormOption.java`
+- `chat/chatmessage/service/ChatMessageService.java`
+- `chat/chatmessage/service/ChatImageService.java`
+- `chat/chatmessage/controller/ChatMessageSocketController.java`
 - `chat/chatreview/service/ChatReviewService.java`
 
 ### 4.5 판단 기준
@@ -272,6 +360,29 @@
 | 예약 생성 | PLACE 1위 + TIME 1위 + 미래 시간 + `placeSource=STORE` | `ReservationStatus.REQUESTED` 예약 생성 | `createReservationByVoteResult` |
 | 채팅방 자동 종료 | `roomStatus=ACTIVE`, `autoCloseAt <= now` | `CLOSED` | `ChatRoomAutoCloseScheduler` |
 | 식당 리뷰 가능 | 예약자 본인 + 예약 `COMPLETED` + 미작성 + 예약시간~3일 이내 | 리뷰 작성 가능 | `ChatFormService.getStoreReviewTarget`, `ReviewService.createReview` |
+
+### 4.5.1 채팅 메시지 기준
+
+사용자가 하는 일: 채팅방에서 텍스트를 보내고, 이미지를 첨부하고, 약속 폼 카드를 공유하고, 메시지를 수정/삭제하거나 읽음 상태를 갱신합니다.
+
+서버가 처리하는 일: 채팅방 참여자인지 확인한 뒤 메시지를 저장하고 `/sub/chat/rooms/{chatRoomId}`로 WebSocket 이벤트를 발행합니다. 채팅방 밖에 있는 상대에게는 채팅 알림을 생성/갱신합니다.
+
+정상 결과: 텍스트/이미지/폼 메시지가 시간순으로 조회되고, 각 메시지에는 보낸 사람, 이미지 URL, 폼 ID, 수정/삭제 여부, 안 읽은 인원 수가 포함됩니다.
+
+문제가 생기면: 채팅방 참여자가 아니면 조회/전송/수정/삭제가 막히고, 닫힌 채팅방에서는 메시지와 폼을 만들 수 없습니다.
+
+| 항목 | 실제 동작 | 결과 | 관련 코드 |
+|---|---|---|---|
+| 텍스트 메시지 | 참여자 + `ChatRoom.ACTIVE`, 500자 이하 | `ChatMessageType.TEXT` 저장 | `ChatMessageService.sendMessage` |
+| 이미지 메시지 | multipart 파일이 있고 contentType이 `image/*` | `CHAT_MESSAGE` 첨부 저장, 메시지는 `IMAGE`, 목록 마지막 문구는 `[사진]` | `ChatImageService.sendImage` |
+| FORM 메시지 | 폼 생성 시 폼 ID를 가진 메시지 저장 | `ChatMessageType.FORM`, `formId` 포함 | `ChatMessageService.sendFormMessage`, `ChatFormService.createForm` |
+| 메시지 수정 | 작성자 본인 + 미삭제 + 텍스트 메시지 | 수정 이력 저장, `edited=true` | `updateMessage`, `ChatMessageEditHistory` |
+| 메시지 삭제 | 작성자 본인 | 실제 삭제가 아니라 `deleted=true`, 마지막 메시지는 `삭제된 메시지입니다.` | `deleteMessage`, `ChatMessage.delete` |
+| 읽음 처리 | 목록 조회 또는 WebSocket read 이벤트 | 참여자의 `lastReadMessageId` 갱신 | `getChatMessages`, `readMessages` |
+| 안 읽은 수 | 상대 참여자의 마지막 읽은 메시지 ID와 비교 | 메시지별 `unreadMemberCount` 계산 | `getUnreadMemberCount` |
+| WebSocket 송신 | `/pub/chat/message/send/edit/delete/read` | `/sub/chat/rooms/{chatRoomId}` 구독자에게 이벤트 전달 | `ChatMessageSocketController` |
+
+현재 코드에는 채팅 입장/퇴장 시스템 메시지 타입은 별도 enum으로 없습니다. 시스템성 안내는 FORM 메시지나 화면 문구로 처리됩니다.
 
 ### 4.6 상태값 변화
 - 채팅방: `ACTIVE → CLOSED`
@@ -513,16 +624,42 @@ DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설�
 ### 8.10 주의사항
 - 사용자 요청 목차에는 `POST/COMMENT/CHAT_MESSAGE/REVIEW`만 있었지만 코드에는 `CHAT_MEMBER` 신고도 존재합니다.
 
+### 8.11 커뮤니티 게시글/댓글 운영 기준
+
+사용자가 하는 일: 전국 게시판 또는 학교 게시판에 게시글을 쓰고, 이미지를 첨부하고, 댓글/대댓글을 작성합니다. 작성자는 본인 게시글과 댓글을 수정하거나 삭제할 수 있습니다.
+
+서버가 처리하는 일: 학교 게시판은 로그인 사용자의 학교를 기준으로 조회하고, 게시글/댓글 작성자 권한을 검증합니다. 삭제는 DB hard delete가 아니라 상태값 변경으로 처리합니다.
+
+정상 결과: 목록/상세에는 `ACTIVE` 게시글과 `ACTIVE` 댓글만 표시되고, 익명 글은 작성자명을 `익명`으로 내려줍니다. 댓글/대댓글 작성 시 대상 작성자에게 알림을 보냅니다.
+
+문제가 생기면: 작성자가 아닌 사용자의 수정/삭제는 `UNAUTHORIZED_ACCESS`로 막고, 이미 숨김/삭제된 대상은 신고/관리자 처리에서 제외됩니다.
+
+| 항목 | 실제 동작 | 결과 | 관련 코드 |
+|---|---|---|---|
+| 게시글 목록 | `GLOBAL`은 전체, `SCHOOL`은 내 학교 기준 | 카테고리/키워드/커서/정렬 적용 | `PostService.getPostList` |
+| 게시글 작성 | 로그인 사용자의 `UserProfile` 조회 | `PostStatus.ACTIVE`, 이미지가 있으면 `POST` 첨부 저장 | `PostService.createPost` |
+| 게시글 상세 | 게시글, 이미지 URL, `ACTIVE` 댓글 조회 | 익명 여부와 내 글/내 댓글 여부 포함 | `getPostDetail` |
+| 게시글 수정 | 작성자 본인만 가능 | 제목/본문 수정, 새 이미지가 있으면 기존 첨부 교체 | `updatePost` |
+| 게시글 삭제 | 작성자 본인만 가능 | `PostStatus.DELETE` | `deletePost` |
+| 게시글 숨김 | 신고 처리/AI 자동 처리 | `PostStatus.HIDDEN` | `Post.hide`, `AdminReportService` |
+| 댓글 작성 | 게시글 존재 + 로그인 사용자 | 댓글 또는 대댓글 저장, 대상 작성자에게 알림 | `CommentService.createComment` |
+| 댓글 수정 | 댓글 작성자 본인 | 내용 수정 | `updateComment` |
+| 댓글 삭제 | 댓글 작성자 본인 | `CommentStatus.DELETED` | `deleteComment` |
+| 댓글 숨김 | 신고 처리/AI 자동 처리/관련 댓글 처리 | `CommentStatus.HIDDEN` | `Comment.hide`, `ReportRelatedActionService` |
+| 첨부 이미지 조회 | `/api/images/{fileId}` | 저장 파일을 공통 이미지 URL로 노출 | `ImageController`, `FileAttachmentService` |
+
 ## 9. AI 신고 자동 처리 기준
 
 ### 9.1 기능 목적
 신고 접수 후 텍스트를 AI/규칙으로 분류해 자동 숨김 또는 관리자 검토로 나눕니다.
 
 ### 9.2 사용자 흐름
-신고 접수 → AI 분석 → 자동 처리 또는 관리자 검토 → 알림 발송.
+신고 접수 → context snapshot 저장 → 커밋 이후 비동기 AI 분석 → 자동 처리 또는 관리자 검토 → 관리자/신고자/작성자 알림 발송.
 
 ### 9.3 서버 처리 흐름
-`ReportCreatedModerationListener`가 커밋 이후 `AiModerationService.analyzeReport`를 호출합니다. `AiClient`는 `ai.provider` 설정에 따라 `mock` 또는 `gemini` 구현이 사용됩니다.
+`ReportService`가 `Report`를 저장한 뒤 `ReportContextSnapshotService.createSnapshot`으로 신고 대상과 제한된 주변 문맥을 저장합니다. `ReportCreatedModerationListener`가 커밋 이후 `AiModerationService.analyzeReport`를 호출합니다. `AiClient`는 `ai.provider` 설정에 따라 `mock` 또는 `gemini` 구현이 사용됩니다.
+
+자동 처리는 두 경로가 있습니다. 첫째, 서버 규칙이 직접 맞으면 `SERVER_RULE_MATCHED` 근거로 처리합니다. 둘째, 서버 규칙 직접 일치는 아니어도 AI 결과가 더 높은 고확신 기준을 충족하면 `AI_HIGH_CONFIDENCE` 근거로 처리할 수 있습니다. 반대로 `exclusionMatched=true`이거나 AI가 `REVIEW_REQUIRED`를 반환한 경우에는 서버가 자동 숨김으로 승격하지 않습니다.
 
 ### 9.4 주요 클래스
 - `ai/client/MockAiClient.java`
@@ -532,6 +669,9 @@ DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설�
 - `ai/moderation/service/ModerationPolicyService.java`
 - `ai/moderation/service/ModerationRuleValidationService.java`
 - `ai/moderation/service/ModerationTargetContentService.java`
+- `report/service/ReportContextSnapshotService.java`
+- `admin/report/service/ReportRelatedActionService.java`
+- `admin/report/domain/ReportRelatedActionItem.java`
 
 ### 9.5 판단 기준
 
@@ -547,30 +687,86 @@ DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설�
 | 도배 자동 후보 | 반복 토큰/문구/문자 패턴 | `FLOODING/AUTO_HIDE` 후보 | `inspect`, `MockAiClient` |
 | 일반 욕설 | 욕설 탐지, 강화 조건 미충족 | `REVIEW_REQUIRED` | `MockAiClient` |
 | 고강도 욕설 | 심한 욕설 + 대상 지칭 + 예외 맥락 없음 | `ABUSE/AUTO_HIDE` 후보 | `severeAbuseMatched` |
-| ruleMatched | 카테고리별 서버 규칙과 텍스트 일치 | 자동 처리 가능 조건 중 하나 | `ModerationRuleValidationService.matches` |
-| AUTO_HIDE 가능 | 유효 결과 + `AUTO_HIDE` + ruleMatched + evidenceRequired + policyCodes + 점수 기준 | 자동 숨김 가능 | `ModerationPolicyService.canAutoHide` |
-| 기본 자동 처리 점수 | SPAM/PERSONAL_INFO/FLOODING risk/confidence `>=0.90` | 자동 처리 가능 | `ModerationPolicyService` |
-| 고강도 욕설 점수 | ABUSE + `ABUSE-SEVERE` + risk/confidence `>=0.95` | 자동 처리 가능 | `ModerationPolicyService` |
+| 성적 괴롭힘 자동 후보 | 직접 대상 + 고강도 성적 수치심/요구 + 예외 맥락 없음 | `SEXUAL_HARASSMENT/AUTO_HIDE` 후보 | `severeSexualHarassmentMatched` |
+| 예외 문맥 | 피해 신고/인용/예시/교육/농담/자기표현 가능성 | 자동 숨김 금지, 관리자 검토 | `exclusionMatched` |
+| ruleMatched | 카테고리별 서버 규칙과 텍스트 일치 | 자동 처리 가능성 판단의 한 경로, `SERVER_RULE_MATCHED` 근거 | `ModerationRuleValidationService.inspectForCategory` |
+| AI 고확신 fallback | 서버 ruleMatched는 아니지만 `AUTO_HIDE`, 증거, policyCodes, 점수, 대상 조건 충족 | `AI_HIGH_CONFIDENCE` 근거로 자동 처리 가능 | `canAutoHideByHighConfidenceFallback` |
+| AUTO_HIDE 공통 필수 | 유효 결과 + `decision=AUTO_HIDE` + 자동 처리 가능 카테고리 + `ruleEvidenceRequired=true` + `policyCodes` 1개 이상 + evidence 존재 + 실질 missingContext 없음 + 예외 문맥 없음 | 자동 숨김 검토 가능 | `ModerationPolicyService.canAutoHide` |
+| 서버 규칙 경로 기본 점수 | `SPAM_AD/PERSONAL_INFO/FLOODING` + ruleMatched + risk/confidence `>=0.90` | `SERVER_RULE_MATCHED` 자동 처리 가능 | `DEFAULT_THRESHOLD` |
+| 서버 규칙 경로 욕설 점수 | `ABUSE` + ruleMatched + `ABUSE-SEVERE` + risk/confidence `>=0.95` | `SERVER_RULE_MATCHED` 자동 처리 가능 | `SEVERE_ABUSE_THRESHOLD` |
+| 서버 규칙 경로 성희롱 점수 | `SEXUAL_HARASSMENT` + ruleMatched + `SEXUAL-HARASSMENT-SEVERE` + risk/confidence `>=0.95` | `SERVER_RULE_MATCHED` 자동 처리 가능 | `SEVERE_ABUSE_THRESHOLD` |
+| AI 고확신 기본 점수 | `SPAM_AD/PERSONAL_INFO/FLOODING` + ruleMatched=false + risk/confidence `>=0.95` | `AI_HIGH_CONFIDENCE` 자동 처리 가능 | `DEFAULT_HIGH_CONFIDENCE_THRESHOLD` |
+| AI 고확신 엄격 점수 | `ABUSE/SEXUAL_HARASSMENT` + ruleMatched=false + 대상 지칭 + risk/confidence `>=0.97` | `AI_HIGH_CONFIDENCE` 자동 처리 가능 | `STRICT_HIGH_CONFIDENCE_THRESHOLD` |
+| 고위험 검토 표시 | `decision=REVIEW_REQUIRED` + risk/confidence `>=0.90` | `HIGH_RISK_REVIEW_REQUIRED`, 자동 숨김 아님 | `AiModerationService.highRiskReviewRequired` |
 | 자동 처리 대상 | targetType이 `POST/COMMENT/CHAT_MESSAGE/REVIEW` | 자동 숨김 가능 | `AiModerationService.isProcessableTarget` |
-| AI 실패 | timeout/HTTP/JSON/검증 실패 | `REVIEW_REQUIRED` fallback | `GeminiAiClient.fallback`, `markFailedAndNotify` |
+| 자동 처리 제외 카테고리 | `SAFE/OTHER/DEFAMATION` | 자동 숨김 금지 | `autoHideEligibleCategory`, `ModerationPolicyService` |
+| 관련 채팅 메시지 숨김 | `CHAT_MESSAGE` + `SPAM_AD/FLOODING/ABUSE/SEXUAL_HARASSMENT/PERSONAL_INFO` 자동 처리 후, snapshot 안 같은 채팅방/작성자/비삭제/신고자 제외/개별 후보 통과 | 관련 메시지 숨김 + `ReportRelatedActionItem` 저장 | `ReportRelatedActionService` |
+| 관련 댓글 숨김 | `COMMENT` + `ABUSE/SEXUAL_HARASSMENT/SPAM_AD/FLOODING/PERSONAL_INFO` 자동 처리 후, snapshot 안 같은 게시글/작성자/ACTIVE/신고자 제외/개별 후보 통과 | 관련 댓글 숨김 + `ReportRelatedActionItem` 저장 | `ReportRelatedActionService` |
+| 관련 항목 중복 방지 | 동일 `reportId + targetType + targetId + actionType` | 중복 저장 차단 | `UK_REPORT_RELATED_ACTION_ITEM`, `existsBy...` |
+| Gemini 429 quota | HTTP 429/`RESOURCE_EXHAUSTED` | `AI_FAILED`, 신고 `PENDING` 유지, 자동 숨김 없음 | `AiProviderQuotaExceededException`, `markFailedAndNotify` |
+| 일반 AI 실패 | timeout/HTTP/JSON/검증 실패 | 관리자 검토용 실패 이력 저장 또는 fallback | `GeminiAiClient.fallback`, `markFailedAndNotify` |
+
+### 9.5.1 autoHideBasis 의미
+
+| 값 | 의미 | 운영 해석 |
+|---|---|---|
+| `SERVER_RULE_MATCHED` | 서버 규칙과 AI 결과가 모두 자동 처리 기준 충족 | 자동 블라인드 근거가 가장 명확함 |
+| `AI_HIGH_CONFIDENCE` | 서버 직접 rule은 아니지만 AI 점수/대상 조건이 고확신 기준 충족 | 자동 블라인드 가능하되 관리자 상세에서 근거 확인 |
+| `EXCLUDED_CONTEXT_REVIEW_REQUIRED` | 피해 신고/인용/예시 등 예외 문맥 감지 | 자동 처리하지 말고 수동 검토 |
+| `HIGH_RISK_REVIEW_REQUIRED` | 점수는 높지만 `REVIEW_REQUIRED` 또는 자동 처리 조건 미충족 | 수동 검토 |
+| `REVIEW_REQUIRED` | AI가 검토 필요로 판단 | 수동 검토 |
+| `NOT_MATCHED` | 자동 처리 기준 미충족 | 수동 검토 또는 조치 없음 판단 |
+| `NOT_ELIGIBLE_CATEGORY` | `SAFE/OTHER/DEFAMATION` 등 자동 처리 제외 | 자동 숨김 금지 |
+| `AI_FAILED` | AI 호출/분석 실패 또는 quota 초과 | 신고는 `PENDING` 유지, 수동 검토 |
+
+### 9.5.2 관련 항목 함께 블라인드 범위
+
+신고 대상이 실제로 `AUTO_PROCESSED`된 뒤에만 관련 항목 처리가 실행됩니다. `REVIEW_REQUIRED`, `AI_FAILED`, `NO_ACTION`, `SAFE/OTHER/DEFAMATION`은 관련 항목 숨김을 하지 않습니다.
+
+| 대상 | 적용 카테고리 | 공통 후보 조건 | 제외 기준 | 복구 기준 |
+|---|---|---|---|---|
+| `CHAT_MESSAGE` | `SPAM_AD`, `FLOODING`, `ABUSE`, `SEXUAL_HARASSMENT`, `PERSONAL_INFO` | snapshot 포함, 같은 채팅방, 같은 작성자, 신고 대상 제외, 신고자 메시지 제외, `deleted=false`, 개별 카테고리 후보 검사 통과, DB 재검증 | 다른 작성자, 정상 반응, 피해 신고/인용/예시/교육 문맥, 문맥 불명확 항목 | `ReportRelatedActionItem`으로 숨긴 메시지만 `deleted=true → false`, `restored=true`, `restoredAt` 저장 |
+| `COMMENT` | `ABUSE`, `SEXUAL_HARASSMENT`, `SPAM_AD`, `FLOODING`, `PERSONAL_INFO` | snapshot 포함, 같은 게시글, 같은 작성자, 신고 대상 제외, 신고자 댓글 제외, `CommentStatus.ACTIVE`, 개별 카테고리 후보 검사 통과, DB 재검증 | 다른 게시글/작성자, 이미 숨김/삭제, 정상 링크/정보, 피해 신고/인용/예시/교육 문맥 | `ReportRelatedActionItem`으로 숨긴 댓글만 `HIDDEN → ACTIVE`, `restored=true`, `restoredAt` 저장 |
+
+관련 항목은 추가 제재 대상이 아닙니다. 여러 메시지/댓글을 함께 숨겨도 매너온도 차감과 작성자 알림은 신고 대상 1건 기준으로만 처리합니다. 관리자 상세 목록에는 `targetType`, `targetId`, `reason`, `restored` 여부 중심으로 표시하며, 개인정보 원문은 그대로 노출하지 않습니다.
+
+### 9.5.3 시연용 신고 문장과 기대 결과
+
+| 문장 예시 | 기대 결과 |
+|---|---|
+| `무조건 수익 보장 가입하면 지급 https://spam.example` | `SPAM_AD/AUTO_HIDE`, 자동 블라인드 |
+| `010-1234-5678 이 사람 번호 퍼뜨려` | `PERSONAL_INFO/AUTO_HIDE`, 자동 블라인드 |
+| `광고글 광고글 광고글 광고글` | `FLOODING/AUTO_HIDE`, 자동 블라인드 |
+| `너는 정말 개새끼야` | `ABUSE/AUTO_HIDE`, 자동 블라인드 |
+| `작성자 몸 보여줘` | `SEXUAL_HARASSMENT/AUTO_HIDE`, 자동 블라인드 |
+| `친구가 나한테 병신이라고 했어요` | 피해 신고/인용 가능성으로 관리자 검토 |
+| `성희롱 예시로 몸 보여줘 같은 말이 있습니다` | 예시/교육 문맥으로 관리자 검토 |
+| `가게 전화번호는 02-123-4567입니다` | 공개 연락처 가능성으로 related hide 제외 또는 관리자 검토 |
+| Gemini 무료 API 429 | `AI_FAILED`, 신고 `PENDING`, 관리자 수동 처리 |
 
 ### 9.6 상태값 변화
 - 분석 저장: `AiProcessingStatus.SUCCEEDED/REVIEW_REQUIRED/NO_ACTION/FAILED`
 - 자동 처리: `AUTO_PROCESSED`
 - 복구: `RESTORED`
 - 신고 자동 처리: `ReportStatus.PENDING → RESOLVED`
+- AI 실패: `ReportStatus.PENDING` 유지
+- 관련 항목 숨김: `ReportRelatedActionItem.restored=false`
 
 ### 9.7 예외/실패 처리
-Gemini API key 없음, HTTP 실패, JSON 파싱 실패, safety block 등은 `REVIEW_REQUIRED` fallback으로 전환됩니다.
+Gemini API key 없음, 일반 HTTP 실패, JSON 파싱 실패, safety block 등은 자동 숨김으로 올리지 않습니다. Gemini HTTP 429 또는 `RESOURCE_EXHAUSTED`는 `AiProviderQuotaExceededException`으로 구분하고, `AiModerationAnalysis.processingStatus=FAILED`, `autoHideBasis=AI_FAILED`로 저장합니다. 이때 `Report`는 `PENDING`으로 유지되고 자동 블라인드, 관련 항목 숨김, 매너온도 차감은 실행하지 않습니다. 관리자에게는 검토 필요 알림을 만들고, 화면에는 “AI 사용량 한도 초과로 관리자 검토가 필요합니다.”처럼 사용자 친화적인 문구만 보여줍니다. API key, 실제 모델명, Gemini 원본 오류 메시지는 화면에 노출하지 않습니다.
+
+관련 항목 숨김은 신고 대상 자동 처리 이후 별도 트랜잭션으로 시도합니다. 관련 항목 처리에 실패해도 신고 대상 자동 처리 자체는 유지되며 로그가 남습니다. 반대로 실제 대상 숨김 전에 관련 이력을 먼저 저장하지 않습니다.
 
 ### 9.8 화면에서 확인하는 방법
-관리자 신고 상세에서 AI 분석 결과, riskScore, confidenceScore, decision, processingStatus를 확인합니다.
+관리자 신고 상세에서 AI 분석 결과, riskScore, confidenceScore, decision, processingStatus, autoHideBasis, 관련 항목 목록을 확인합니다. 관련 항목 목록은 targetType, targetId, reason, restored 여부 중심으로 표시하고 개인정보 원문은 노출하지 않습니다.
 
 ### 9.9 테스트/시연 계정
 `admin / qwer1234`, 신고 대상은 `[시연 신고]` prefix 데이터.
 
 ### 9.10 주의사항
 - AI 자동 처리도 `TrustService.applyAiReportPenalty`로 5.0점을 차감하지만, `lockAccountWhenZero=false`라 단일 AI 처리로 즉시 계정 잠금하지 않습니다.
+- 관련 메시지/댓글을 여러 건 함께 숨겨도 매너온도는 신고 대상 1건 기준으로만 차감합니다.
+- 관련 항목 추가 알림은 별도로 보내지 않고 기존 신고 대상 1건 기준 알림만 사용합니다.
 - `AiGeminiProperties` record 내부 fallback은 `timeoutSeconds <= 0`일 때 10초지만, `application.properties` 기본값은 30초입니다.
 
 ## 10. 신고 처리 복구 기준
@@ -587,6 +783,9 @@ Gemini API key 없음, HTTP 실패, JSON 파싱 실패, safety block 등은 `REV
 ### 10.4 주요 클래스
 - `admin/report/service/AdminReportService.java`
 - `admin/report/domain/ReportProcessHistory.java`
+- `admin/report/domain/ReportRelatedActionItem.java`
+- `admin/report/repository/ReportRelatedActionItemRepository.java`
+- `admin/report/service/ReportRelatedActionService.java`
 - `AdminCommunityReportService`
 - `AdminChatReportService`
 - `AdminReviewReportService`
@@ -603,6 +802,8 @@ Gemini API key 없음, HTTP 실패, JSON 파싱 실패, safety block 등은 `REV
 | 댓글 복구 | 이전 상태가 `NOT_FOUND` 아님 | `Comment.restoreStatus(beforeStatus)` | `AdminCommunityReportService` |
 | 리뷰 복구 | 이전 상태가 `NOT_FOUND` 아님 | `StoreReview.restoreStatus(beforeStatus)` | `AdminReviewReportService` |
 | 채팅 메시지 복구 | `beforeChatDeleted` 저장값 존재 | `restoreDeleted(beforeChatDeleted)` | `AdminChatReportService` |
+| 관련 메시지 복구 | `ReportRelatedActionItem` + 현재 `deleted=true` | `restoreDeleted(beforeDeleted)`, `restored=true` | `ReportRelatedActionService` |
+| 관련 댓글 복구 | `ReportRelatedActionItem` + 현재 `HIDDEN` | `restoreStatus(beforeStatus)`, `restored=true` | `ReportRelatedActionService` |
 | AI 분석 복구 표시 | 처리 이력 `processorType=AI` | `AiProcessingStatus.RESTORED` | `cancelReport` |
 | 매너온도 복구 | 이력에 `penaltyHistory` 있음 | 처리 전 매너온도로 복구 | `TrustService.cancelReportPenalty` |
 | 이력 취소 표시 | 취소 수행 | `canceledYn=Y`, `canceledBy`, `canceledAt`, `cancelReason` 저장 | `ReportProcessHistory.cancel` |
@@ -611,13 +812,15 @@ Gemini API key 없음, HTTP 실패, JSON 파싱 실패, safety block 등은 `REV
 - `ReportStatus.RESOLVED/REJECTED → CANCELED`
 - `AiProcessingStatus.AUTO_PROCESSED → RESTORED`
 - `TrustPenaltyHistory.canceledYn=N → Y`
+- `ReportRelatedActionItem.restored=false → true`, `restoredAt` 저장
 - 콘텐츠 상태는 처리 전 상태로 복원됩니다.
 
 ### 10.7 예외/실패 처리
 `PENDING` 또는 이미 `CANCELED`인 신고를 취소하면 `INVALID_INPUT_VALUE`입니다. 복구 이력이 없으면 `INVALID_INPUT_VALUE`입니다.
+관련 항목 복구 시 대상이 사라졌거나 이미 숨김 상태가 아니면 복구하지 않고 skip 로그를 남깁니다. 이렇게 하면 다른 관리자 조치로 상태가 바뀐 항목을 잘못 되돌리는 위험을 줄입니다.
 
 ### 10.8 화면에서 확인하는 방법
-관리자 신고 상세에서 처리 취소 버튼을 사용하고, 대상 게시글/댓글/리뷰/채팅 메시지 표시 상태를 확인합니다.
+관리자 신고 상세에서 처리 취소 버튼을 사용하고, 대상 게시글/댓글/리뷰/채팅 메시지 표시 상태와 관련 항목의 `복구 완료` 배지를 확인합니다.
 
 ### 10.9 테스트/시연 계정
 `admin / qwer1234`
@@ -687,6 +890,8 @@ AI 자동 처리도 매너온도는 차감하지만 `lockAccountWhenZero=false`�
 ### 12.3 서버 처리 흐름
 `AdminDashboardService`가 요약 카드를 구성하고, `AdminMemberService`/`AdminReportService`가 개별 처리를 수행합니다.
 
+관리자 기능은 화면에서 한글 상태로 보여주더라도 내부적으로는 `MemberRole`, `ApprovalStatus`, `ReportStatus`, `AiProcessingStatus`, `AutoHideBasis` 같은 enum을 사용합니다. 화면 문구는 실제 상태와 모순되면 안 됩니다. 예를 들어 `REVIEW_REQUIRED`인데 자동 숨김 완료 문구를 보여주면 안 되고, `AI_FAILED`는 관리자 수동 검토 가능 상태로 안내해야 합니다.
+
 ### 12.4 주요 클래스
 - `admin/dashboard/service/AdminDashboardService.java`
 - `admin/member/service/AdminMemberService.java`
@@ -706,6 +911,11 @@ AI 자동 처리도 매너온도는 차감하지만 `lockAccountWhenZero=false`�
 | AI 실패 | `FAILED` | AI 실패 카드 | `AdminDashboardService` |
 | 낮은 매너온도 | `mannerTemperature <= 10.0` | 신뢰도 카드 | `LOW_MANNER_THRESHOLD` |
 | 관리자 알림 | 지정된 `ADMIN_*` 타입 | 관리자 알림 목록 표시 | `NotificationService.ADMIN_NOTIFICATION_TYPES` |
+| 회원 검색 | 역할 `ALL/USER/OWNER/ADMIN` + keyword + paging | 회원 목록/상세 표시 | `AdminMemberService.findMembers` |
+| 회원 잠금 해제 | `lockedYn=Y` 회원 | `lockedYn=N`, 실패 횟수 초기화 | `AdminMemberService.unlockMember` |
+| 점주 승인 목록 | 승인 상태 `ALL/PENDING/APPROVED/REJECTED` + keyword | 점주 신청 목록 표시 | `findOwnerApprovals` |
+| 신고 수동 처리 | 관리자 처리/반려/취소 | 콘텐츠 상태, 신고 상태, 제재 이력 변경 | `AdminReportService` |
+| 관련 항목 목록 | `ReportRelatedActionItem` | related targetType/targetId/reason/restored 표시 | `AdminReportDetailResponse` |
 
 ### 12.6 상태값 변화
 점주 승인/반려/취소, 신고 처리/반려/취소, 회원 잠금 해제가 관리자 기능에서 수행됩니다.
@@ -721,6 +931,29 @@ AI 자동 처리도 매너온도는 차감하지만 `lockAccountWhenZero=false`�
 
 ### 12.10 주의사항
 관리자 대시보드의 AI 처리 카운트는 `AUTO_PROCESSED + RESTORED`를 합산합니다.
+
+### 12.11 알림 기능 기준
+
+사용자가 하는 일: 알림 아이콘이나 알림 화면에서 새 알림을 확인하고, 단건 또는 전체 읽음 처리를 합니다.
+
+서버가 처리하는 일: 알림을 DB에 저장하고, 로그인 사용자가 SSE에 연결되어 있으면 `notification` 이벤트로 갱신 신호를 보냅니다. 채팅방 알림은 같은 채팅방 기준으로 최신 1개처럼 접어서 보여주고, 내용에는 누적 개수를 담습니다.
+
+정상 결과: 일반 사용자는 본인 알림, 관리자는 관리자 알림 타입만 조회합니다. 채팅방에 들어가면 해당 채팅방 알림은 읽음 처리됩니다.
+
+문제가 생기면: SSE 연결이 끊기거나 전송 실패가 발생하면 서버는 emitter를 제거합니다. 프론트는 다시 `/api/notifications/subscribe`로 연결해야 최신 신호를 받을 수 있습니다.
+
+| 항목 | 실제 동작 | 결과 | 관련 코드 |
+|---|---|---|---|
+| SSE 구독 | `/api/notifications/subscribe` | 1시간 emitter 저장, `connect` 이벤트 전송 | `NotificationService.subscribe` |
+| 일반 알림 목록 | 최근 접힌 목록 20개 | `notifications`, `unreadCount` 반환 | `getMyNotifications` |
+| 전체 알림 목록 | 접힌 전체 목록 | `notifications`, `unreadCount` 반환 | `getAllNotifications` |
+| 단건 읽음 | 알림 ID 기준 | `readYn=Y`; 채팅방 알림이면 같은 채팅방 미읽음도 함께 읽음 | `readNotification` |
+| 전체 읽음 | 로그인 회원 전체 알림 | 모두 `readYn=Y`, SSE 갱신 신호 | `readAllNotifications` |
+| 채팅 알림 | 같은 채팅방 알림 삭제 후 새 알림 저장 | `CHAT`, `CHAT_ROOM`, “N개” 형태 | `sendOrUpdateChatRoomNotification` |
+| 관리자 알림 | `ADMIN_AI_REVIEW_REQUIRED`, `ADMIN_AI_FAILED`, `ADMIN_AI_REPORT_PROCESSED`, `ADMIN_OWNER_APPROVAL_PENDING`, `ADMIN_REPEATED_REPORT` | 관리자 알림 목록에만 표시 | `ADMIN_NOTIFICATION_TYPES` |
+| AI 실패 알림 | AI 분석 실패 또는 quota 초과 | 관리자 검토 필요 알림 | `AiModerationService.markFailedAndNotify` |
+| AI 자동 처리 알림 | 자동 처리 완료 | 관리자/신고자/작성자 기준 알림 | `AdminReportService.autoResolveReport` |
+| 복구 알림 | 관리자 처리 취소 | 신고 대상/관련 항목 복구 후 알림 | `AdminReportService.cancelReport` |
 
 ## 13. DataLoader / 시연 데이터 기준
 
@@ -803,14 +1036,14 @@ AI, 지도, demo mode, secret 설정을 운영 환경에 맞게 분리합니다.
 | 추천 모델 | `GEMINI_RECOMMENDATION_MODEL` | 식당 추천 설명 모델 | `GeminiRestaurantRecommendationClient` |
 | timeout 권장 | `GEMINI_TIMEOUT_SECONDS=30` | 연결/읽기 timeout | `application.properties` |
 | Naver Map | `NAVER_MAP_CLIENT_ID` | 지도 JS client id | `application.properties`, templates |
-| secret 제외 | local/secret/oauth properties | build resources 제외 | `build.gradle.processResources` |
+| secret 제외 | 현재 `build.gradle.processResources`에 제외 규칙 없음 | 로컬/비밀 설정이 산출물에 섞이지 않도록 배포 전 별도 점검 필요 | `build.gradle.processResources` |
 | demo mode | `app.demo-mode=false` | DataLoader 실행 방지 | `DataLoader` |
 
 ### 14.6 상태값 변화
 배포 설정은 상태값을 바꾸지 않지만, AI provider와 DataLoader 실행 여부를 결정합니다.
 
 ### 14.7 예외/실패 처리
-Gemini API key가 없으면 추천은 DB fallback, 신고는 provider 설정에 따라 mock 또는 Gemini fallback을 사용합니다.
+Gemini API key가 없으면 추천은 DB fallback, 신고 분석은 provider 설정에 따라 mock 또는 Gemini fallback을 사용합니다. Gemini 신고 분석에서 429 quota 초과가 발생하면 `AI_FAILED`로 저장하고 신고는 `PENDING`으로 유지합니다.
 
 ### 14.8 화면에서 확인하는 방법
 지도 화면에서 Naver Map 로딩, AI 추천/신고에서 fallback 여부, 관리자 대시보드를 확인합니다.
@@ -819,7 +1052,9 @@ Gemini API key가 없으면 추천은 DB fallback, 신고는 provider 설정에 
 운영에서는 시연 계정 생성을 권장하지 않습니다.
 
 ### 14.10 주의사항
-- `application-local.properties`가 로컬에 있더라도 빌드 산출물에는 제외되도록 `build.gradle`에 설정되어 있습니다.
+- `application.properties`가 `spring.profiles.active=local`, `spring.profiles.include=local`을 포함합니다. 운영 배포 전 profile 설정을 반드시 분리해야 합니다.
+- 현재 `build.gradle`의 `processResources` 블록은 비어 있어 `application-local.properties` 또는 비밀 설정 파일 제외를 보장하지 않습니다. 실제 비밀값은 환경변수나 배포 시스템 secret으로 옮기고 산출물 포함 여부를 확인해야 합니다.
+- Gemini 모델 기본값은 코드 설정상 `gemini-3.5-flash`입니다. 이 이름이 실제 운영 계정에서 사용 가능한지는 배포 환경에서 별도 확인해야 합니다.
 - Naver Cloud Console에 배포 도메인을 등록해야 지도 인증 오류가 나지 않습니다.
 - HTTPS 환경에서 위치 권한이 정상 동작합니다. localhost 예외를 제외하면 브라우저 위치 API는 보안 컨텍스트가 필요합니다.
 
@@ -835,7 +1070,7 @@ Gemini API key가 없으면 추천은 DB fallback, 신고는 provider 설정에 
 가격, 평점, 거리, 리뷰 수, 메뉴 판매 상태는 DB 값이 기준입니다. 없는 가게/메뉴를 생성하지 않기 위해 후보 검증을 서버에서 수행합니다.
 
 ### Q. AI가 신고를 무조건 자동 처리하는가?
-아닙니다. `AUTO_HIDE`, ruleMatched, policyCodes, 점수 기준, 대상 타입이 모두 맞아야 자동 처리합니다. 아니면 관리자 검토로 넘깁니다.
+아닙니다. `decision=AUTO_HIDE`는 필수이지만 `ruleMatched`가 반드시 true여야 하는 것은 아닙니다. 서버 규칙이 맞으면 `SERVER_RULE_MATCHED` 근거로 자동 처리할 수 있고, 서버 규칙 직접 일치가 없어도 AI 고확신 점수/증거/대상 조건을 만족하면 `AI_HIGH_CONFIDENCE` 근거로 자동 처리할 수 있습니다. `REVIEW_REQUIRED`, 예외 문맥, `SAFE/OTHER/DEFAMATION`, AI 실패는 자동 처리하지 않습니다.
 
 ### Q. 욕설은 왜 대부분 관리자 검토인가?
 일반 욕설은 맥락 판단이 필요하므로 `REVIEW_REQUIRED`입니다. 고강도 욕설 + 대상 지칭 + 예외 맥락 없음 + 높은 점수 조건일 때만 자동 숨김 후보입니다.
@@ -844,7 +1079,13 @@ Gemini API key가 없으면 추천은 DB fallback, 신고는 provider 설정에 
 이미지 분석 로직이 없어서 첨부가 있고 실질 텍스트가 없으면 `IMAGE-NOT-ANALYZED`로 관리자 검토가 필요합니다.
 
 ### Q. 신고 취소하면 데이터가 어떻게 복구되는가?
-처리 전 상태를 `ReportProcessHistory`에 저장해두고, 취소 시 게시글/댓글/리뷰 상태 또는 채팅 메시지 deleted 값을 원래 값으로 되돌립니다. 제재 이력이 있으면 매너온도도 처리 전 값으로 복구합니다.
+처리 전 상태를 `ReportProcessHistory`에 저장해두고, 취소 시 게시글/댓글/리뷰 상태 또는 채팅 메시지 deleted 값을 원래 값으로 되돌립니다. 관련 메시지/댓글은 `ReportRelatedActionItem`으로 이 신고에서 직접 숨긴 항목만 복구하고 `restored=true`, `restoredAt`을 저장합니다. 제재 이력이 있으면 매너온도도 처리 전 값으로 복구합니다.
+
+### Q. 관련 메시지/댓글이 여러 건 숨겨지면 매너온도도 여러 번 차감되는가?
+아닙니다. 관련 항목은 노출 정리를 위한 추가 블라인드일 뿐 추가 제재가 아닙니다. 매너온도 차감과 작성자 알림은 신고 대상 1건 기준으로만 처리합니다.
+
+### Q. Gemini 무료 한도를 넘으면 사용자는 어떤 상태를 보게 되는가?
+Gemini 429 quota 초과는 코드 오류와 구분해 `AI_FAILED`로 저장합니다. 신고는 `PENDING`으로 남아 관리자가 수동 처리할 수 있고, 자동 블라인드/관련 항목 숨김/매너온도 차감은 실행하지 않습니다. 화면에는 내부 API key, 모델명, 원본 오류 대신 관리자 검토가 필요하다는 안내만 표시합니다.
 
 ### Q. DataLoader는 운영에서도 켜도 되는가?
 아니요. `dev.dummy-data.enabled=true`와 `app.demo-mode=true`가 모두 필요하지만, 운영에서는 둘 다 꺼야 합니다.

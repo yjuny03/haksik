@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GeminiAiClientTest {
 
@@ -247,9 +248,14 @@ class GeminiAiClientTest {
     }
 
     @Test
-    void rateLimitFallsBackToReview() {
-        server.enqueue(new MockResponse().setResponseCode(429).setBody("{}"));
-        assertFallback(client.analyzeModeration(request()));
+    void rateLimitThrowsQuotaExceededException() {
+        server.enqueue(new MockResponse().setResponseCode(429).setBody("""
+                {"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded"}}
+                """));
+
+        assertThatThrownBy(() -> client.analyzeModeration(request()))
+                .isInstanceOf(AiProviderQuotaExceededException.class)
+                .hasMessage(AiProviderQuotaExceededException.USER_MESSAGE);
     }
 
     @Test

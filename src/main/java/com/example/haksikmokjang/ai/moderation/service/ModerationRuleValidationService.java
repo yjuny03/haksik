@@ -20,6 +20,7 @@ public class ModerationRuleValidationService {
     private static final Pattern NATIONAL_ID_PATTERN = Pattern.compile("(?<!\\d)\\d{6}[- ]?[1-4]\\d{6}(?!\\d)");
     private static final Pattern ACCOUNT_PATTERN = Pattern.compile("(?<!\\d)\\d{2,6}[- ]\\d{2,6}(?:[- ]\\d{1,6}){1,3}(?!\\d)");
     private static final Pattern DETAILED_ADDRESS_PATTERN = Pattern.compile("(?:[가-힣]+(?:로|길|동|읍|면|리))\\s*\\d{1,4}(?:-\\d{1,4})?(?:\\s*(?:번지|동|호))?");
+    private static final Pattern MASKED_PERSONAL_INFO_PATTERN = Pattern.compile("(?i)\\*{2,}|x{2,}");
     private static final Pattern REPEATED_TOKEN_PATTERN = Pattern.compile("(?i)(?<!\\S)(\\S{2,})(?:\\s+\\1){3,}(?!\\S)");
     private static final Pattern REPEATED_PHRASE_PATTERN = Pattern.compile("(?i)(.{4,30}?)(?:[.!?~\\s]+\\1){2,}");
     private static final Pattern REPEATED_CHARACTER_PATTERN = Pattern.compile("(.)\\1{7,}");
@@ -51,6 +52,16 @@ public class ModerationRuleValidationService {
     private static final List<String> SEVERE_SEXUAL_HARASSMENT_TERMS = List.of(
             "섹스하자", "따먹", "박고", "빨아", "벗어", "만져", "보지", "자지", "꼴리"
     );
+    private static final List<String> RELATED_SEXUAL_HARASSMENT_TERMS = List.of(
+            "섹스하자", "자자", "모텔 가자", "모텔가자", "따먹", "박고", "빨아", "벗어봐", "벗어라",
+            "만져도 돼", "만져도되", "가슴 만", "엉덩이 만", "몸 보여", "몸보여", "몸 보여줘", "몸보여줘",
+            "사진 보내봐", "사진 보내", "야한 사진", "가슴 보여", "엉덩이 보여", "보지", "자지", "꼴리",
+            "몸매 죽인다", "몸매 쩐다", "가슴 크다", "엉덩이 크다", "음란한", "색녀"
+    );
+    private static final List<String> COMMENT_SPAM_TERMS = List.of(
+            "오픈채팅", "텔레그램", "리딩방", "가입", "문의", "입금", "출금", "수익", "수익 보장",
+            "원금 보장", "무료", "할인", "특가", "이벤트", "홍보", "광고", "구매", "클릭", "카톡", "연락"
+    );
     private static final List<String> TARGET_TERMS = List.of(
             "너", "넌", "너는", "너를", "너한테", "너에게", "너희",
             "네가", "니", "니가", "니는", "니를", "니한테",
@@ -75,6 +86,20 @@ public class ModerationRuleValidationService {
     private static final List<String> PERSONAL_INFO_EXCLUSION_TERMS = List.of(
             "제 번호", "내 번호", "제 연락처", "내 연락처", "제 이메일", "내 이메일",
             "문의", "예약", "상담", "영업", "가게", "매장", "사업자", "대표번호", "고객센터"
+    );
+    private static final List<String> SPAM_CONTEXT_EXCLUSION_TERMS = List.of(
+            "광고 신고", "스팸 신고", "신고합니다", "신고했", "예시", "인용", "라고", "정보 공유", "참고 자료",
+            "출처", "공식", "관련 자료"
+    );
+    private static final List<String> RELATED_PERSONAL_INFO_EXCLUSION_TERMS = List.of(
+            "제 번호", "내 번호", "제 연락처", "내 연락처", "제 이메일", "내 이메일", "누가 제", "누가 내",
+            "개인정보 예시", "예시", "인용", "신고합니다", "신고했", "피해 내용", "피해를 입",
+            "가게", "매장", "학교", "기관", "행정실", "대표번호", "고객센터", "사업자", "예약", "문의",
+            "공식 연락처", "공식 번호", "정보 제공", "참고"
+    );
+    private static final List<String> RELATED_PERSONAL_INFO_DISCLOSURE_TERMS = List.of(
+            "찾아가라", "찾아가", "박제한다", "박제", "연락해라", "연락해", "전화해라", "전화해",
+            "퍼뜨려", "유포", "공개한다", "공개합니다", "신상", "저 사람", "이 사람", "그 사람", "남의", "타인"
     );
 
     public RuleEvidence inspect(String rawContent) {
@@ -183,6 +208,69 @@ public class ModerationRuleValidationService {
         String normalized = value.toLowerCase(Locale.ROOT);
         RuleEvidence evidence = inspect(value);
         return containsAny(normalized, RELATED_ABUSE_TERMS) && !evidence.contextExcluded();
+    }
+
+    public boolean abuseRelatedCommentCandidate(String content) {
+        String value = content == null ? "" : content;
+        RuleEvidence evidence = inspect(value);
+        return !evidence.contextExcluded()
+                && (evidence.severeAbuseMatched()
+                || abuseRelatedMessageCandidate(value));
+    }
+
+    public boolean sexualHarassmentRelatedMessageCandidate(String content) {
+        String value = content == null ? "" : content;
+        String normalized = value.toLowerCase(Locale.ROOT);
+        CategoryRuleEvidence evidence = inspectForCategory(ModerationCategory.SEXUAL_HARASSMENT, value);
+        if (evidence.exclusionMatched()) {
+            return false;
+        }
+        return evidence.ruleMatched()
+                || containsAny(normalized, RELATED_SEXUAL_HARASSMENT_TERMS);
+    }
+
+    public boolean sexualHarassmentRelatedCommentCandidate(String content) {
+        String value = content == null ? "" : content;
+        String normalized = value.toLowerCase(Locale.ROOT);
+        CategoryRuleEvidence evidence = inspectForCategory(ModerationCategory.SEXUAL_HARASSMENT, value);
+        if (evidence.exclusionMatched()) {
+            return false;
+        }
+        return evidence.ruleMatched()
+                || containsAny(normalized, RELATED_SEXUAL_HARASSMENT_TERMS);
+    }
+
+    public boolean spamRelatedCommentCandidate(String content) {
+        String value = content == null ? "" : content;
+        String normalized = value.toLowerCase(Locale.ROOT);
+        if (containsAny(normalized, SPAM_CONTEXT_EXCLUSION_TERMS)) {
+            return false;
+        }
+        return containsAny(normalized, HIGH_RISK_SPAM_TERMS)
+                || containsAny(normalized, List.of("오픈채팅", "텔레그램", "리딩방", "수익 보장", "원금 보장"))
+                || (URL_PATTERN.matcher(value).find() && containsAny(normalized, COMMENT_SPAM_TERMS));
+    }
+
+    public boolean personalInfoRelatedMessageCandidate(String content) {
+        return personalInfoRelatedCandidate(content);
+    }
+
+    public boolean personalInfoRelatedCommentCandidate(String content) {
+        return personalInfoRelatedCandidate(content);
+    }
+
+    private boolean personalInfoRelatedCandidate(String content) {
+        String value = content == null ? "" : content;
+        String normalized = value.toLowerCase(Locale.ROOT);
+        RuleEvidence evidence = inspect(value);
+        if (!evidence.personalInfoMatched()
+                || evidence.personalInfoContextExcluded()
+                || MASKED_PERSONAL_INFO_PATTERN.matcher(value).find()
+                || containsAny(normalized, RELATED_PERSONAL_INFO_EXCLUSION_TERMS)) {
+            return false;
+        }
+        return evidence.personalInfoAutoHideMatched()
+                || containsAny(normalized, RELATED_PERSONAL_INFO_DISCLOSURE_TERMS);
     }
 
     private boolean containsAny(String content, List<String> terms) {

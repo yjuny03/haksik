@@ -3,6 +3,7 @@ package com.example.haksikmokjang.admin.report.service;
 import com.example.haksikmokjang.admin.report.domain.ReportProcessHistory;
 import com.example.haksikmokjang.admin.report.dto.AdminReportCancelRequest;
 import com.example.haksikmokjang.admin.report.repository.ReportProcessHistoryRepository;
+import com.example.haksikmokjang.admin.report.repository.ReportRelatedActionItemRepository;
 import com.example.haksikmokjang.ai.client.MockAiClient;
 import com.example.haksikmokjang.ai.moderation.domain.AiModerationAnalysis;
 import com.example.haksikmokjang.ai.moderation.domain.AiProcessingStatus;
@@ -20,6 +21,7 @@ import com.example.haksikmokjang.report.domain.Report;
 import com.example.haksikmokjang.report.domain.ReportProcessorType;
 import com.example.haksikmokjang.report.domain.ReportStatus;
 import com.example.haksikmokjang.report.repository.ReportRepository;
+import com.example.haksikmokjang.report.repository.ReportContextSnapshotRepository;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,7 +51,10 @@ class AdminReportAiRestoreTest {
     @Mock private TrustService trustService;
     @Mock private FileAttachmentRepository fileAttachmentRepository;
     @Mock private ReportProcessHistoryRepository historyRepository;
+    @Mock private ReportRelatedActionItemRepository relatedActionItemRepository;
+    @Mock private ReportRelatedActionService relatedActionService;
     @Mock private AiModerationAnalysisRepository analysisRepository;
+    @Mock private ReportContextSnapshotRepository snapshotRepository;
     @Mock private Member reporter;
     @Mock private Member targetWriter;
     @Mock private Member admin;
@@ -68,7 +73,10 @@ class AdminReportAiRestoreTest {
                 trustService,
                 fileAttachmentRepository,
                 historyRepository,
-                analysisRepository
+                relatedActionItemRepository,
+                relatedActionService,
+                analysisRepository,
+                snapshotRepository
         );
     }
 

@@ -134,6 +134,7 @@ public class MockAiClient implements AiClient {
             String reasonSummary
     ) {
         // Mock 점수는 실제 AI 신뢰도가 아니라 공모전 데모 흐름을 재현하기 위한 시나리오 값입니다.
+        boolean autoHide = decision == ModerationDecision.AUTO_HIDE;
         return new ModerationResult(
                 POLICY_VERSION,
                 category,
@@ -143,8 +144,12 @@ public class MockAiClient implements AiClient {
                 policyCodes,
                 containsPersonalInfo,
                 personalInfoTypes,
-                true,
+                autoHide,
                 reasonSummary,
+                autoHide ? List.of(reasonSummary) : List.of(),
+                List.of(),
+                null,
+                null,
                 MODEL_NAME
         );
     }

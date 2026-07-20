@@ -411,6 +411,15 @@ function renderAiAnalysis(ai, attachments) {
     const attachmentNotice = Array.isArray(attachments) && attachments.length > 0
         ? `<div class="detail-reason-box">첨부 이미지는 AI 분석 대상이 아닙니다. 텍스트만 분석했습니다.</div>`
         : "";
+    const techDetail = ai.processingStatus === "FAILED"
+        ? ""
+        : `
+            <details class="tech-detail">
+                <summary>기술 상세</summary>
+                <div>모델: ${escapeAdminHtml(ai.modelName)}</div>
+                <div>AI 원문 요약: ${escapeAdminHtml(sanitizeAiReasonForDisplay(ai))}</div>
+            </details>
+        `;
 
     return `
         <div class="detail-section ai-result-card">
@@ -425,11 +434,7 @@ function renderAiAnalysis(ai, attachments) {
                 <div class="detail-item"><span class="detail-label">정책 코드</span><strong>${policyCodes}</strong></div>
             </div>
             <div class="detail-reason-box">${escapeAdminHtml(aiFinalDescription(ai))}</div>
-            <details class="tech-detail">
-                <summary>기술 상세</summary>
-                <div>모델: ${escapeAdminHtml(ai.modelName)}</div>
-                <div>AI 원문 요약: ${escapeAdminHtml(sanitizeAiReasonForDisplay(ai))}</div>
-            </details>
+            ${techDetail}
             ${attachmentNotice}
         </div>
     `;
@@ -469,7 +474,7 @@ function processingStatusLabel(value) {
     return ({
         AUTO_PROCESSED: "자동 처리 완료",
         REVIEW_REQUIRED: "관리자 검토 필요",
-        FAILED: "분석 실패",
+        FAILED: "AI 분석 실패",
         RESTORED: "복구 완료"
     })[value] || escapeAdminHtml(value);
 }
@@ -566,6 +571,9 @@ function aiFinalDescription(ai) {
         return "자동 처리 제외 대상이므로 관리자 검토가 필요합니다.";
     }
     if (ai.autoHideBasis === "AI_FAILED" || ai.processingStatus === "FAILED") {
+        if (String(ai.reasonSummary || "").includes("AI 사용량 한도 초과")) {
+            return "AI 사용량 한도 초과로 자동 분석을 완료하지 못했습니다. 관리자가 직접 검토해주세요.";
+        }
         return "AI 분석 실패로 관리자 검토가 필요합니다.";
     }
     if (ai.decision === "REVIEW_REQUIRED" || ai.processingStatus === "REVIEW_REQUIRED") {
@@ -734,6 +742,23 @@ function renderProcessHistory(report) {
 
 function relatedHideHistorySentence(report, count) {
     const category = report.aiAnalysis?.category;
+    if (report.targetType === "COMMENT") {
+        if (category === "ABUSE") {
+            return `AI가 욕설/비방 맥락으로 판단하여 관련 댓글 ${count}건을 함께 블라인드 처리했습니다.`;
+        }
+        if (category === "SEXUAL_HARASSMENT") {
+            return `AI가 성적 괴롭힘 맥락으로 판단하여 관련 댓글 ${count}건을 함께 블라인드 처리했습니다.`;
+        }
+        if (category === "SPAM_AD") {
+            return `AI가 광고/스팸 맥락으로 판단하여 관련 댓글 ${count}건을 함께 블라인드 처리했습니다.`;
+        }
+        if (category === "FLOODING") {
+            return `AI가 도배 맥락으로 판단하여 관련 댓글 ${count}건을 함께 블라인드 처리했습니다.`;
+        }
+        if (category === "PERSONAL_INFO") {
+            return `AI가 개인정보 노출 맥락으로 판단하여 관련 댓글 ${count}건을 함께 블라인드 처리했습니다.`;
+        }
+    }
     if (category === "SPAM_AD") {
         return `AI가 광고/스팸 맥락으로 판단하여 관련 메시지 ${count}건을 함께 블라인드 처리했습니다.`;
     }
@@ -743,11 +768,34 @@ function relatedHideHistorySentence(report, count) {
     if (category === "ABUSE") {
         return `AI가 욕설/비방 맥락으로 판단하여 관련 메시지 ${count}건을 함께 블라인드 처리했습니다.`;
     }
+    if (category === "SEXUAL_HARASSMENT") {
+        return `AI가 성적 괴롭힘 맥락으로 판단하여 관련 메시지 ${count}건을 함께 블라인드 처리했습니다.`;
+    }
+    if (category === "PERSONAL_INFO") {
+        return `AI가 개인정보 노출 맥락으로 판단하여 관련 메시지 ${count}건을 함께 블라인드 처리했습니다.`;
+    }
     return `AI가 정책 위반 맥락으로 판단하여 관련 메시지 ${count}건을 함께 블라인드 처리했습니다.`;
 }
 
 function relatedRestoreHistorySentence(report, count) {
     const category = report.aiAnalysis?.category;
+    if (report.targetType === "COMMENT") {
+        if (category === "ABUSE") {
+            return `AI 자동 처리 취소로 관련 욕설/비방 댓글 ${count}건을 함께 복구했습니다.`;
+        }
+        if (category === "SEXUAL_HARASSMENT") {
+            return `AI 자동 처리 취소로 관련 성적 괴롭힘 댓글 ${count}건을 함께 복구했습니다.`;
+        }
+        if (category === "SPAM_AD") {
+            return `AI 자동 처리 취소로 관련 광고/스팸 댓글 ${count}건을 함께 복구했습니다.`;
+        }
+        if (category === "FLOODING") {
+            return `AI 자동 처리 취소로 관련 도배 댓글 ${count}건을 함께 복구했습니다.`;
+        }
+        if (category === "PERSONAL_INFO") {
+            return `AI 자동 처리 취소로 관련 개인정보 노출 댓글 ${count}건을 함께 복구했습니다.`;
+        }
+    }
     if (category === "ABUSE") {
         return `AI 자동 처리 취소로 관련 욕설/비방 메시지 ${count}건을 함께 복구했습니다.`;
     }
@@ -756,6 +804,12 @@ function relatedRestoreHistorySentence(report, count) {
     }
     if (category === "FLOODING") {
         return `AI 자동 처리 취소로 관련 도배 메시지 ${count}건을 함께 복구했습니다.`;
+    }
+    if (category === "SEXUAL_HARASSMENT") {
+        return `AI 자동 처리 취소로 관련 성적 괴롭힘 메시지 ${count}건을 함께 복구했습니다.`;
+    }
+    if (category === "PERSONAL_INFO") {
+        return `AI 자동 처리 취소로 관련 개인정보 노출 메시지 ${count}건을 함께 복구했습니다.`;
     }
     return `AI 자동 처리 취소로 관련 메시지 ${count}건을 함께 복구했습니다.`;
 }

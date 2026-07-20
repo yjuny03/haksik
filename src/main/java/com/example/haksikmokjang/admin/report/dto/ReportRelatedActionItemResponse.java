@@ -15,6 +15,8 @@ public class ReportRelatedActionItemResponse {
     private Long targetId;
     private Boolean beforeDeleted;
     private Boolean afterDeleted;
+    private String beforeStatus;
+    private String afterStatus;
     private String actionType;
     private String reason;
     private boolean restored;
@@ -28,6 +30,8 @@ public class ReportRelatedActionItemResponse {
                 .targetId(item.getTargetId())
                 .beforeDeleted(item.getBeforeDeleted())
                 .afterDeleted(item.getAfterDeleted())
+                .beforeStatus(item.getBeforeStatus())
+                .afterStatus(item.getAfterStatus())
                 .actionType(item.getActionType())
                 .reason(item.getReason())
                 .restored(item.isRestored())

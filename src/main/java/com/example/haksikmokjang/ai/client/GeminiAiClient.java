@@ -132,12 +132,17 @@ public class GeminiAiClient implements AiClient {
             logGeminiResponse(httpResponse);
 
             if (!httpResponse.statusCode().is2xxSuccessful()) {
+                if (quotaExceeded(httpResponse)) {
+                    throw new AiProviderQuotaExceededException();
+                }
                 return fallback("REQUEST_FAILED");
             }
 
             ModerationResult result = parseResponse(httpResponse.body());
             logParsedModerationResult(request.reportId(), result);
             return policyService.isValid(result) ? result : fallback("INVALID_RESULT");
+        } catch (AiProviderQuotaExceededException exception) {
+            throw exception;
         } catch (JsonProcessingException exception) {
             log.warn("[GEMINI-AI] Gemini moderation malformed response status={} contentType={} modelName={} reason={} responseBody={} exceptionClass={} exceptionMessage={}",
                     statusForLog(httpResponse),
@@ -149,6 +154,12 @@ public class GeminiAiClient implements AiClient {
                     safeExceptionMessage(exception));
             return fallback("MALFORMED_JSON");
         } catch (RestClientResponseException exception) {
+            if (quotaExceeded(exception)) {
+                log.warn("[GEMINI-AI] Gemini moderation quota exceeded status={} reason={}",
+                        exception.getStatusCode(),
+                        httpFailureReason(exception));
+                throw new AiProviderQuotaExceededException();
+            }
             log.warn("[GEMINI-AI] Gemini moderation HTTP failure status={} modelName={} reason={} responseBody={} exceptionClass={} exceptionMessage={}",
                     exception.getStatusCode(),
                     properties.model(),
@@ -168,6 +179,23 @@ public class GeminiAiClient implements AiClient {
                     safeExceptionMessage(exception));
             return fallback("REQUEST_FAILED");
         }
+    }
+
+    private boolean quotaExceeded(GeminiHttpResponse response) {
+        return response.statusCode().value() == 429;
+    }
+
+    private boolean quotaExceeded(RestClientResponseException exception) {
+        return exception.getStatusCode().value() == 429;
+    }
+
+    private boolean quotaExceededBody(String body) {
+        if (body == null || body.isBlank()) {
+            return true;
+        }
+        return body.contains("RESOURCE_EXHAUSTED")
+                || body.toLowerCase(java.util.Locale.ROOT).contains("quota")
+                || body.toLowerCase(java.util.Locale.ROOT).contains("rate limit");
     }
 
     private void logGeminiSettings(String phase) {
@@ -230,6 +258,10 @@ public class GeminiAiClient implements AiClient {
                 || body.contains("not available"))) {
             return "MODEL_NOT_FOUND";
         }
+        if (exception.getStatusCode().value() == 429
+                && quotaExceededBody(body)) {
+            return "RESOURCE_EXHAUSTED";
+        }
         return "HTTP_" + exception.getStatusCode().value();
     }
 
@@ -242,6 +274,10 @@ public class GeminiAiClient implements AiClient {
                 || body.contains("no longer available")
                 || body.contains("not available"))) {
             return "MODEL_NOT_FOUND";
+        }
+        if (response.statusCode().value() == 429
+                && quotaExceededBody(body)) {
+            return "RESOURCE_EXHAUSTED";
         }
         return "HTTP_" + response.statusCode().value();
     }

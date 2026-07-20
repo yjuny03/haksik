@@ -46,6 +46,12 @@ public class ReportRelatedActionItem extends CreatedTimeEntity {
     @Column(name = "after_deleted")
     private Boolean afterDeleted;
 
+    @Column(name = "before_status", length = 30)
+    private String beforeStatus;
+
+    @Column(name = "after_status", length = 30)
+    private String afterStatus;
+
     @Column(name = "action_type", nullable = false, length = 30)
     private String actionType;
 
@@ -72,6 +78,27 @@ public class ReportRelatedActionItem extends CreatedTimeEntity {
         this.targetId = targetId;
         this.beforeDeleted = beforeDeleted;
         this.afterDeleted = afterDeleted;
+        this.actionType = actionType;
+        this.reason = reason;
+        this.restored = false;
+    }
+
+    public ReportRelatedActionItem(
+            Long reportId,
+            String targetType,
+            Long targetId,
+            String beforeStatus,
+            String afterStatus,
+            String actionType,
+            String reason
+    ) {
+        this.reportId = reportId;
+        this.targetType = targetType;
+        this.targetId = targetId;
+        this.beforeDeleted = null;
+        this.afterDeleted = null;
+        this.beforeStatus = beforeStatus;
+        this.afterStatus = afterStatus;
         this.actionType = actionType;
         this.reason = reason;
         this.restored = false;
