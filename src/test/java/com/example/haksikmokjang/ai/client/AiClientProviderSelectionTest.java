@@ -16,8 +16,8 @@ class AiClientProviderSelectionTest {
             .withBean(ModerationRuleValidationService.class)
             .withUserConfiguration(
                     MockAiClient.class,
-                    GeminiAiClient.class,
-                    GeminiClientConfiguration.class
+                    ClaudeAiClient.class,
+                    ClaudeClientConfiguration.class
             );
 
     @Test
@@ -30,16 +30,16 @@ class AiClientProviderSelectionTest {
     }
 
     @Test
-    void geminiProviderSelectsGeminiClient() {
+    void claudeProviderSelectsClaudeClient() {
         contextRunner.withPropertyValues(
-                        "ai.provider=gemini",
-                        "ai.gemini.api-key=test-key",
-                        "ai.gemini.model=gemini-test",
-                        "ai.gemini.timeout-seconds=1"
+                        "ai.provider=claude",
+                        "ai.claude.api-key=test-key",
+                        "ai.claude.model=claude-test",
+                        "ai.claude.timeout-seconds=1"
                 )
                 .run(context -> {
                     assertThat(context).hasSingleBean(AiClient.class);
-                    assertThat(context.getBean(AiClient.class)).isInstanceOf(GeminiAiClient.class);
+                    assertThat(context.getBean(AiClient.class)).isInstanceOf(ClaudeAiClient.class);
                 });
     }
 

@@ -2,8 +2,8 @@ package com.example.haksikmokjang.ai.recommendation;
 
 import com.example.haksikmokjang.ai.recommendation.dto.RestaurantRecommendationRequest;
 import com.example.haksikmokjang.ai.recommendation.dto.RestaurantRecommendationResponse;
-import com.example.haksikmokjang.ai.recommendation.service.GeminiRecommendationResult;
-import com.example.haksikmokjang.ai.recommendation.service.GeminiRestaurantRecommendationClient;
+import com.example.haksikmokjang.ai.recommendation.service.ClaudeRecommendationResult;
+import com.example.haksikmokjang.ai.recommendation.service.ClaudeRestaurantRecommendationClient;
 import com.example.haksikmokjang.ai.recommendation.service.RestaurantCandidate;
 import com.example.haksikmokjang.ai.recommendation.service.RestaurantCandidateQueryService;
 import com.example.haksikmokjang.ai.recommendation.service.RestaurantRecommendationService;
@@ -43,7 +43,7 @@ class RestaurantRecommendationServiceTest {
     @Mock
     private RestaurantCandidateQueryService candidateQueryService;
     @Mock
-    private GeminiRestaurantRecommendationClient geminiClient;
+    private ClaudeRestaurantRecommendationClient claudeClient;
     @Mock
     private UserProfileRepository userProfileRepository;
     @Mock
@@ -64,7 +64,7 @@ class RestaurantRecommendationServiceTest {
         recommendationService = new RestaurantRecommendationService(
                 candidateQueryService,
                 new RestaurantScoringService(),
-                geminiClient,
+                claudeClient,
                 userProfileRepository,
                 memberLocationRepository,
                 fileAttachmentRepository,
@@ -92,7 +92,7 @@ class RestaurantRecommendationServiceTest {
                 candidate(2L, "분식집", "한식", 700, 20L),
                 candidate(3L, "국밥집", "한식", 900, 30L)
         ));
-        when(geminiClient.recommend(any(), any(), any(), any(), any(), eq(3))).thenReturn(Optional.empty());
+        when(claudeClient.recommend(any(), any(), any(), any(), any(), eq(3))).thenReturn(Optional.empty());
 
         RestaurantRecommendationResponse response = recommendationService.recommend(member, request());
 
@@ -102,16 +102,16 @@ class RestaurantRecommendationServiceTest {
     }
 
     @Test
-    void unknownGeminiStoreIdFallsBackToDbRanking() {
+    void unknownClaudeStoreIdFallsBackToDbRanking() {
         RestaurantCandidate candidate = candidate(1L, "한식집", "한식", 500, 10L);
         when(candidateQueryService.findCandidates(any(), eq(1.0))).thenReturn(List.of(
                 candidate,
                 candidate(2L, "분식집", "한식", 700, 20L),
                 candidate(3L, "국밥집", "한식", 900, 30L)
         ));
-        when(geminiClient.recommend(any(), any(), any(), any(), any(), eq(3))).thenReturn(Optional.of(
-                new GeminiRecommendationResult(List.of(
-                        new GeminiRecommendationResult.Item(
+        when(claudeClient.recommend(any(), any(), any(), any(), any(), eq(3))).thenReturn(Optional.of(
+                new ClaudeRecommendationResult(List.of(
+                        new ClaudeRecommendationResult.Item(
                                 999L, 10L, 1, "없는 가게", "한식", "가까움", "리뷰", ""
                         )
                 ))
@@ -120,19 +120,19 @@ class RestaurantRecommendationServiceTest {
         RestaurantRecommendationResponse response = recommendationService.recommend(member, request());
 
         assertThat(response.getSource()).isEqualTo("DB_FALLBACK");
-        assertThat(response.getFallbackReason()).isEqualTo("GEMINI_UNAVAILABLE");
+        assertThat(response.getFallbackReason()).isEqualTo("CLAUDE_UNAVAILABLE");
         assertThat(response.getRecommendations().get(0).getStoreId()).isEqualTo(1L);
     }
 
     @Test
-    void geminiFailureReturnsDbFallback() {
+    void claudeFailureReturnsDbFallback() {
         RestaurantCandidate candidate = candidate(1L, "한식집", "한식", 500, 10L);
         when(candidateQueryService.findCandidates(any(), eq(1.0))).thenReturn(List.of(
                 candidate,
                 candidate(2L, "분식집", "한식", 700, 20L),
                 candidate(3L, "국밥집", "한식", 900, 30L)
         ));
-        when(geminiClient.recommend(any(), any(), any(), any(), any(), eq(3))).thenReturn(Optional.empty());
+        when(claudeClient.recommend(any(), any(), any(), any(), any(), eq(3))).thenReturn(Optional.empty());
 
         RestaurantRecommendationResponse response = recommendationService.recommend(member, request());
 
@@ -141,14 +141,14 @@ class RestaurantRecommendationServiceTest {
     }
 
     @Test
-    void chatbotPersonalRecommendationUsesDbStoreAndMenuWhenGeminiFails() {
+    void chatbotPersonalRecommendationUsesDbStoreAndMenuWhenClaudeFails() {
         RestaurantCandidate candidate = candidate(1L, "인덕 제육하우스", "한식", 500, 10L);
         when(candidateQueryService.findCandidates(any(), eq(1.0))).thenReturn(List.of(
                 candidate,
                 candidate(2L, "분식집", "분식", 700, 20L),
                 candidate(3L, "국밥집", "한식", 900, 30L)
         ));
-        when(geminiClient.recommend(any(), any(), any(), any(), any(), eq(1))).thenReturn(Optional.empty());
+        when(claudeClient.recommend(any(), any(), any(), any(), any(), eq(1))).thenReturn(Optional.empty());
 
         String answer = recommendationService.recommendForChatbot(member, "한식", 37.0, 127.0);
 

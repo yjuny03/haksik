@@ -2,7 +2,7 @@ package com.example.haksikmokjang.ai.recommendation.service;
 
 import java.util.List;
 
-public record GeminiRecommendationResult(
+public record ClaudeRecommendationResult(
         List<Item> recommendations
 ) {
     public record Item(

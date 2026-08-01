@@ -46,7 +46,7 @@ public class RestaurantRecommendationService {
 
     private final RestaurantCandidateQueryService candidateQueryService;
     private final RestaurantScoringService scoringService;
-    private final GeminiRestaurantRecommendationClient geminiClient;
+    private final ClaudeRestaurantRecommendationClient claudeClient;
     private final UserProfileRepository userProfileRepository;
     private final MemberLocationRepository memberLocationRepository;
     private final FileAttachmentRepository fileAttachmentRepository;
@@ -125,9 +125,9 @@ public class RestaurantRecommendationService {
                     RestaurantRecommendationSource.DB_FALLBACK, "NO_CANDIDATES", chatPreferenceCounts, majorityCategory);
         }
 
-        List<RestaurantCandidate> geminiCandidates = scoredCandidates.stream().limit(MAX_LIMIT).toList();
-        Optional<GeminiRecommendationResult> geminiResult = geminiClient.recommend(
-                geminiCandidates,
+        List<RestaurantCandidate> claudeCandidates = scoredCandidates.stream().limit(MAX_LIMIT).toList();
+        Optional<ClaudeRecommendationResult> claudeResult = claudeClient.recommend(
+                claudeCandidates,
                 preferredCategory,
                 requestedCategory,
                 chatPreferenceCounts,
@@ -135,11 +135,11 @@ public class RestaurantRecommendationService {
                 limit
         );
 
-        if (geminiResult.isPresent()) {
-            List<RestaurantRecommendationItem> validatedItems = toGeminiItems(geminiResult.get(), geminiCandidates, limit);
+        if (claudeResult.isPresent()) {
+            List<RestaurantRecommendationItem> validatedItems = toClaudeItems(claudeResult.get(), claudeCandidates, limit);
             if (!validatedItems.isEmpty()) {
                 return baseResponse(center, preferredCategory, initialRadius(request), searchResult.radiusKm(), validatedItems,
-                        RestaurantRecommendationSource.GEMINI, null, chatPreferenceCounts, majorityCategory);
+                        RestaurantRecommendationSource.CLAUDE, null, chatPreferenceCounts, majorityCategory);
             }
         }
 
@@ -150,7 +150,7 @@ public class RestaurantRecommendationService {
                 searchResult.radiusKm(),
                 toDbFallbackItems(scoredCandidates, limit, fallbackReason(chatPreferenceCounts)),
                 RestaurantRecommendationSource.DB_FALLBACK,
-                "GEMINI_UNAVAILABLE",
+                "CLAUDE_UNAVAILABLE",
                 chatPreferenceCounts,
                 majorityCategory
         );
@@ -371,8 +371,8 @@ public class RestaurantRecommendationService {
         }
     }
 
-    private List<RestaurantRecommendationItem> toGeminiItems(
-            GeminiRecommendationResult result,
+    private List<RestaurantRecommendationItem> toClaudeItems(
+            ClaudeRecommendationResult result,
             List<RestaurantCandidate> candidates,
             int limit
     ) {
@@ -385,14 +385,14 @@ public class RestaurantRecommendationService {
 
         return result.recommendations().stream()
                 .sorted(Comparator.comparing(item -> item.rank() == null ? Integer.MAX_VALUE : item.rank()))
-                .map(item -> toValidatedGeminiItem(item, candidateByStoreId))
+                .map(item -> toValidatedClaudeItem(item, candidateByStoreId))
                 .flatMap(Optional::stream)
                 .limit(limit)
                 .toList();
     }
 
-    private Optional<RestaurantRecommendationItem> toValidatedGeminiItem(
-            GeminiRecommendationResult.Item item,
+    private Optional<RestaurantRecommendationItem> toValidatedClaudeItem(
+            ClaudeRecommendationResult.Item item,
             Map<Long, RestaurantCandidate> candidateByStoreId
     ) {
         RestaurantCandidate candidate = candidateByStoreId.get(item.recommendedStoreId());

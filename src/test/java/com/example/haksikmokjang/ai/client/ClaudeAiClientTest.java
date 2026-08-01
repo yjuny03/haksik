@@ -1,5 +1,7 @@
 package com.example.haksikmokjang.ai.client;
 
+import com.anthropic.client.AnthropicClient;
+import com.anthropic.client.okhttp.AnthropicOkHttpClient;
 import com.example.haksikmokjang.ai.moderation.domain.ModerationCategory;
 import com.example.haksikmokjang.ai.moderation.domain.ModerationDecision;
 import com.example.haksikmokjang.ai.moderation.dto.ModerationPromptRequest;
@@ -13,8 +15,6 @@ import okhttp3.mockwebserver.SocketPolicy;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
-import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -24,26 +24,19 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class GeminiAiClientTest {
+class ClaudeAiClientTest {
 
     private MockWebServer server;
     private ObjectMapper objectMapper;
-    private GeminiAiClient client;
+    private ClaudeAiClient client;
 
     @BeforeEach
     void setUp() throws IOException {
         server = new MockWebServer();
         server.start();
         objectMapper = new ObjectMapper();
-        var factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Duration.ofMillis(300));
-        factory.setReadTimeout(Duration.ofMillis(300));
-        RestClient restClient = RestClient.builder()
-                .baseUrl(server.url("/").toString())
-                .requestFactory(factory)
-                .build();
-        var properties = new AiGeminiProperties("test-key", "gemini-test", 1, server.url("/").toString());
-        client = new GeminiAiClient(restClient, objectMapper, properties, new ModerationPolicyService());
+        var properties = new AiClaudeProperties("test-key", "claude-test", 1, server.url("/").toString());
+        client = new ClaudeAiClient(anthropicClient(properties), properties, new ModerationPolicyService());
     }
 
     @AfterEach
@@ -51,87 +44,45 @@ class GeminiAiClientTest {
         server.shutdown();
     }
 
+    private AnthropicClient anthropicClient(AiClaudeProperties properties) {
+        return AnthropicOkHttpClient.builder()
+                .apiKey(properties.apiKey())
+                .baseUrl(properties.baseUrl())
+                .timeout(Duration.ofSeconds(properties.timeoutSeconds()))
+                .maxRetries(0)
+                .build();
+    }
+
     @Test
-    void sendsJsonContentTypeAndAcceptHeaders() throws Exception {
-        server.enqueue(geminiResponse(200, validModerationJson(), "STOP"));
+    void sendsApiKeyAndJsonContentType() throws Exception {
+        server.enqueue(claudeResponse(200, validModerationJson(), "end_turn"));
 
         client.analyzeModeration(request());
 
         var sent = server.takeRequest();
+        assertThat(sent.getHeader("x-api-key")).isEqualTo("test-key");
         assertThat(sent.getHeader("Content-Type")).contains("application/json");
-        assertThat(sent.getHeader("Accept")).contains("application/json");
-    }
-
-    @Test
-    void parsesOctetStreamJsonResponseAsUtf8Bytes() throws Exception {
-        server.enqueue(geminiResponse(200, validModerationJson(), "STOP", "application/octet-stream"));
-
-        ModerationResult result = client.analyzeModeration(request());
-
-        assertThat(result.category()).isEqualTo(ModerationCategory.SPAM_AD);
-        assertThat(result.decision()).isEqualTo(ModerationDecision.AUTO_HIDE);
-        assertThat(result.modelName()).isEqualTo("gemini-test");
-    }
-
-    @Test
-    void malformedOctetStreamResponseFallsBackToReview() throws Exception {
-        server.enqueue(new MockResponse().setResponseCode(200)
-                .addHeader("Content-Type", "application/octet-stream")
-                .setBody("not-json"));
-
-        ModerationResult result = client.analyzeModeration(request());
-
-        assertFallback(result);
-        assertThat(result.missingContext()).containsExactly("MALFORMED_JSON");
     }
 
     @Test
     void parsesStructuredJsonResponse() throws Exception {
-        server.enqueue(geminiResponse(200, validModerationJson(), "STOP"));
+        server.enqueue(claudeResponse(200, validModerationJson(), "end_turn"));
 
         ModerationResult result = client.analyzeModeration(request());
 
         assertThat(result.category()).isEqualTo(ModerationCategory.SPAM_AD);
         assertThat(result.decision()).isEqualTo(ModerationDecision.AUTO_HIDE);
         assertThat(result.evidence()).containsExactly("상업적 유도 문구", "외부 링크");
-        assertThat(result.modelName()).isEqualTo("gemini-test");
+        assertThat(result.modelName()).isEqualTo("claude-test");
 
         JsonNode sent = objectMapper.readTree(server.takeRequest().getBody().readUtf8());
-        assertThat(sent.path("generationConfig").path("responseMimeType").asText()).isEqualTo("application/json");
-        assertThat(sent.path("system_instruction").path("parts").get(0).path("text").asText())
-                .contains("학식목장 서비스의 콘텐츠 신고 분류기");
-        assertThat(sent.path("contents").get(0).path("parts").get(0).path("text").asText())
+        assertThat(sent.path("model").asText()).isEqualTo("claude-test");
+        assertThat(sent.path("system").asText()).contains("학식목장 서비스의 콘텐츠 신고 분류기");
+
+        String userContent = userMessageText(sent);
+        assertThat(userContent)
                 .contains("<untrusted_content>", "광고 문장")
                 .doesNotContain("alternativeCategory", "alternativeReason");
-    }
-
-    @Test
-    void sendsGeminiCompatibleResponseSchema() throws Exception {
-        server.enqueue(geminiResponse(200, validModerationJson(), "STOP"));
-
-        client.analyzeModeration(request());
-
-        JsonNode schema = objectMapper.readTree(server.takeRequest().getBody().readUtf8())
-                .path("generationConfig")
-                .path("responseSchema");
-        assertThat(schema.path("type").asText()).isEqualTo("object");
-        assertThat(schema.has("additionalProperties")).isFalse();
-        assertNoAdditionalProperties(schema);
-        assertNoArrayType(schema);
-        assertThat(schema.path("properties").has("alternativeCategory")).isFalse();
-        assertThat(schema.path("properties").has("alternativeReason")).isFalse();
-    }
-
-    @Test
-    void responseSchemaEnumsDoNotContainEmptyString() throws Exception {
-        server.enqueue(geminiResponse(200, validModerationJson(), "STOP"));
-
-        client.analyzeModeration(request());
-
-        JsonNode schema = objectMapper.readTree(server.takeRequest().getBody().readUtf8())
-                .path("generationConfig")
-                .path("responseSchema");
-        assertNoEmptyEnumValue(schema);
     }
 
     @Test
@@ -150,7 +101,7 @@ class GeminiAiClientTest {
                 Map.entry("evidence", List.of("상업적 유도 문구", "외부 링크")),
                 Map.entry("missingContext", List.of())
         ));
-        server.enqueue(geminiResponse(200, json, "STOP"));
+        server.enqueue(claudeResponse(200, json, "end_turn"));
 
         ModerationResult result = client.analyzeModeration(request());
 
@@ -160,31 +111,26 @@ class GeminiAiClientTest {
 
     @Test
     void missingApiKeyFallsBackToReview() {
-        var properties = new AiGeminiProperties("", "gemini-test", 1, server.url("/").toString());
-        var missingKeyClient = new GeminiAiClient(
-                RestClient.builder().baseUrl(server.url("/").toString()).build(),
-                objectMapper,
-                properties,
-                new ModerationPolicyService()
-        );
+        var properties = new AiClaudeProperties("", "claude-test", 1, server.url("/").toString());
+        var missingKeyClient = new ClaudeAiClient(anthropicClient(properties), properties, new ModerationPolicyService());
 
         assertFallback(missingKeyClient.analyzeModeration(request()));
     }
 
     @Test
-    void defaultModelUsesCurrentStableFlash() {
-        var properties = new AiGeminiProperties("test-key", null, 1, server.url("/").toString());
+    void defaultModelUsesCurrentStableSonnet() {
+        var properties = new AiClaudeProperties("test-key", null, 1, server.url("/").toString());
 
-        assertThat(properties.model()).isEqualTo("gemini-3.5-flash");
+        assertThat(properties.model()).isEqualTo("claude-sonnet-5");
     }
 
     @Test
     void modelNotFoundFallsBackToReview() throws Exception {
         String body = objectMapper.writeValueAsString(Map.of(
+                "type", "error",
                 "error", Map.of(
-                        "code", 404,
-                        "status", "NOT_FOUND",
-                        "message", "This model models/gemini-test is no longer available to new users."
+                        "type", "not_found_error",
+                        "message", "model: claude-test"
                 )
         ));
         server.enqueue(new MockResponse().setResponseCode(404)
@@ -194,28 +140,18 @@ class GeminiAiClientTest {
         ModerationResult result = client.analyzeModeration(request());
 
         assertFallback(result);
-        assertThat(result.modelName()).isEqualTo("gemini-test");
+        assertThat(result.modelName()).isEqualTo("claude-test");
     }
 
     @Test
-    void safetyFinishReasonFallsBackToReview() throws Exception {
-        server.enqueue(geminiResponse(200, validModerationJson(), "SAFETY"));
-        assertFallback(client.analyzeModeration(request()));
-    }
-
-    @Test
-    void promptSafetyBlockFallsBackToReview() throws Exception {
-        String body = objectMapper.writeValueAsString(Map.of(
-                "promptFeedback", Map.of("blockReason", "SAFETY")
-        ));
-        server.enqueue(new MockResponse().setResponseCode(200)
-                .addHeader("Content-Type", "application/json").setBody(body));
+    void refusalStopReasonFallsBackToReview() throws Exception {
+        server.enqueue(claudeResponse(200, validModerationJson(), "refusal"));
         assertFallback(client.analyzeModeration(request()));
     }
 
     @Test
     void malformedJsonFallsBackToReview() throws Exception {
-        server.enqueue(geminiResponse(200, "{broken", "STOP"));
+        server.enqueue(claudeResponse(200, "{broken", "end_turn"));
         assertFallback(client.analyzeModeration(request()));
     }
 
@@ -237,7 +173,7 @@ class GeminiAiClientTest {
                 Map.entry("alternativeCategory", "OTHER"),
                 Map.entry("alternativeReason", "의미 충돌")
         ));
-        server.enqueue(geminiResponse(200, invalid, "STOP"));
+        server.enqueue(claudeResponse(200, invalid, "end_turn"));
         assertFallback(client.analyzeModeration(request()));
     }
 
@@ -250,7 +186,7 @@ class GeminiAiClientTest {
     @Test
     void rateLimitThrowsQuotaExceededException() {
         server.enqueue(new MockResponse().setResponseCode(429).setBody("""
-                {"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded"}}
+                {"type":"error","error":{"type":"rate_limit_error","message":"Quota exceeded"}}
                 """));
 
         assertThatThrownBy(() -> client.analyzeModeration(request()))
@@ -270,19 +206,27 @@ class GeminiAiClientTest {
         assertFallback(client.analyzeModeration(request()));
     }
 
-    private MockResponse geminiResponse(int status, String moderationJson, String finishReason) throws Exception {
-        return geminiResponse(status, moderationJson, finishReason, "application/json");
+    private String userMessageText(JsonNode sent) {
+        JsonNode content = sent.path("messages").get(0).path("content");
+        if (content.isTextual()) {
+            return content.asText();
+        }
+        return content.get(0).path("text").asText();
     }
 
-    private MockResponse geminiResponse(int status, String moderationJson, String finishReason, String contentType) throws Exception {
+    private MockResponse claudeResponse(int status, String moderationJson, String stopReason) throws Exception {
         String body = objectMapper.writeValueAsString(Map.of(
-                "candidates", List.of(Map.of(
-                        "finishReason", finishReason,
-                        "content", Map.of("parts", List.of(Map.of("text", moderationJson)))
-                ))
+                "id", "msg_test",
+                "type", "message",
+                "role", "assistant",
+                "model", "claude-test",
+                "content", List.of(Map.of("type", "text", "text", moderationJson)),
+                "stop_reason", stopReason,
+                "stop_sequence", "",
+                "usage", Map.of("input_tokens", 10, "output_tokens", 20)
         ));
         return new MockResponse().setResponseCode(status)
-                .addHeader("Content-Type", contentType).setBody(body);
+                .addHeader("Content-Type", "application/json").setBody(body);
     }
 
     private String validModerationJson() throws Exception {
@@ -315,26 +259,5 @@ class GeminiAiClientTest {
         assertThat(result.confidenceScore()).isZero();
         assertThat(result.policyCodes()).containsExactly("AI-PROVIDER-FAILURE");
         assertThat(result.reasonSummary()).isEqualTo("AI 분석을 완료하지 못해 관리자 검토가 필요합니다.");
-    }
-
-    private void assertNoAdditionalProperties(JsonNode node) {
-        assertThat(node.has("additionalProperties")).isFalse();
-        node.forEach(this::assertNoAdditionalProperties);
-    }
-
-    private void assertNoArrayType(JsonNode node) {
-        if (node.has("type")) {
-            assertThat(node.path("type").isArray()).isFalse();
-        }
-        node.forEach(this::assertNoArrayType);
-    }
-
-    private void assertNoEmptyEnumValue(JsonNode node) {
-        if (node.has("enum")) {
-            assertThat(node.path("enum"))
-                    .extracting(JsonNode::asText)
-                    .doesNotContain("");
-        }
-        node.forEach(this::assertNoEmptyEnumValue);
     }
 }

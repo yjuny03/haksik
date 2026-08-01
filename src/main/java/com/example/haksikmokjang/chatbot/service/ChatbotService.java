@@ -1,29 +1,48 @@
 package com.example.haksikmokjang.chatbot.service;
 
+import com.anthropic.client.AnthropicClient;
+import com.anthropic.client.okhttp.AnthropicOkHttpClient;
+import com.anthropic.models.messages.Message;
+import com.anthropic.models.messages.MessageCreateParams;
+import com.anthropic.models.messages.TextBlock;
 import com.example.haksikmokjang.ai.recommendation.service.RestaurantRecommendationService;
 import com.example.haksikmokjang.member.core.domain.Member;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-import java.util.*;
+
+import java.time.Duration;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ChatbotService {
 
-    private final RestTemplate restTemplate = new RestTemplate();
     private final RestaurantRecommendationService restaurantRecommendationService;
 
-    // 🚨 application.properties 나 application.yml 에 gemini.api.key=오빠키값 설정해두기!
-    @Value("${ai.gemini.api-key:${gemini.api.key:}}")
-    private String geminiApiKey;
+    private AnthropicClient anthropicClient;
 
-    @Value("${ai.gemini.model:gemini-3.5-flash}")
-    private String geminiModel;
+    // 🚨 application.properties 나 application.yml 에 ai.claude.api-key=오빠키값 설정해두기!
+    @Value("${ai.claude.api-key:${claude.api.key:}}")
+    private String claudeApiKey;
 
-    @SuppressWarnings("unchecked")
+    @Value("${ai.claude.model:claude-sonnet-5}")
+    private String claudeModel;
+
+    @Value("${ai.claude.timeout-seconds:30}")
+    private int claudeTimeoutSeconds;
+
+    @PostConstruct
+    void initClient() {
+        this.anthropicClient = AnthropicOkHttpClient.builder()
+                .apiKey(claudeApiKey)
+                .timeout(Duration.ofSeconds(claudeTimeoutSeconds > 0 ? claudeTimeoutSeconds : 30))
+                .build();
+    }
+
     public String getAiResponse(String userMessage, String preferredFood, Member member) {
         return getAiResponse(userMessage, preferredFood, member, null, null);
     }
@@ -37,12 +56,6 @@ public class ChatbotService {
                     lng
             );
         }
-
-        //제미나이 API 엔드포인트
-        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
 
         // 선호 음식 귓속말 세팅
         String foodInstruction = "";
@@ -72,40 +85,29 @@ public class ChatbotService {
                 "14. 외부 질문: 가이드 외의 질문은 정보 제공이 어렵다고 답변해 주십시오.\n\n" +
                 "주의사항: 가이드에 없는 내용은 임의로 생성하지 말고 '해당 정보는 현재 제공이 어렵습니다'라고 명시해 주세요.";
 
-        // 제미나이 입맛에 맞게 JSON 바디 포장하기
-        Map<String, Object> requestBody = new HashMap<>();
-
-        // 시스템 프롬프트 넣기 (Gemini 2.5 방식)
-        Map<String, Object> systemInstruction = new HashMap<>();
-        systemInstruction.put("parts", Map.of("text", systemPrompt));
-        requestBody.put("system_instruction", systemInstruction);
-
-        // 유저가 보낸 메시지 넣기
-        List<Map<String, Object>> contents = new ArrayList<>();
-        Map<String, Object> userContent = new HashMap<>();
-        userContent.put("parts", List.of(Map.of("text", userMessage)));
-        contents.add(userContent);
-        requestBody.put("contents", contents);
-
-        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
-
         try {
-            ResponseEntity<Map> response = restTemplate.postForEntity(url, entity, Map.class);
-            Map<String, Object> responseBody = response.getBody();
+            MessageCreateParams params = MessageCreateParams.builder()
+                    .model(claudeModel)
+                    .maxTokens(1024L)
+                    .system(systemPrompt)
+                    .addUserMessage(userMessage)
+                    .build();
 
-            // 제미나이 응답 까보기 (구조: candidates[0].content.parts[0].text)
-            List<Map<String, Object>> candidates = (List<Map<String, Object>>) responseBody.get("candidates");
-            if (candidates != null && !candidates.isEmpty()) {
-                Map<String, Object> content = (Map<String, Object>) candidates.get(0).get("content");
-                List<Map<String, String>> parts = (List<Map<String, String>>) content.get("parts");
-                if (parts != null && !parts.isEmpty()) {
-                    return parts.get(0).get("text");
-                }
-            }
-            return "현재 시스템 지연으로 응답을 가져오지 못했습니다. 잠시 후 다시 시도해 주십시오.";
+            Message response = anthropicClient.messages().create(params);
+
+            // 클로드 응답 까보기 (구조: content[].text)
+            String text = response.content().stream()
+                    .map(block -> block.text().map(TextBlock::text).orElse(""))
+                    .filter(value -> !value.isBlank())
+                    .findFirst()
+                    .orElse(null);
+
+            return text == null
+                    ? "현재 시스템 지연으로 응답을 가져오지 못했습니다. 잠시 후 다시 시도해 주십시오."
+                    : text;
 
         } catch (Exception e) {
-            e.printStackTrace();
+            log.warn("[CLAUDE-CHATBOT] response failure", e);
             return " 다시 한번 물어봐주세요.";
         }
     }
