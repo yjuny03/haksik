@@ -1,4 +1,4 @@
-# 학식목장 서비스 운영 기준 문서
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      # 학식목장 서비스 운영 기준 문서
 
 작성 기준: 실제 코드 기준  
 작성일: 2026-07-21
@@ -33,17 +33,17 @@
 | AI 식당 추천 | 챗봇 개인 추천, 채팅방 약속 장소 추천 | DB 후보 중 추천 이유 생성 | 없는 가게/메뉴 생성을 막기 위해 후보 조회와 가격/평점/거리/리뷰 수는 서버 DB 값을 사용합니다. |
 | AI 신고 분석 | 신고 접수 후 비동기 분석 | 신고 내용을 자동 숨김/검토 필요/조치 없음으로 분류 | 신고는 제재로 이어질 수 있어 애매하면 자동 처리하지 않고 관리자 검토로 넘깁니다. |
 | 이미지-only 신고 | 첨부만 있고 실질 텍스트가 없는 신고 | 자동 판정하지 않고 검토 필요 처리 | 현재 코드는 이미지 내용을 분석하지 않으므로 이미지-only 신고를 자동 처리하지 않습니다. |
-| 일반 챗봇 답변 | 챗봇 일반 문의 | 서비스 안내형 자연어 답변 | 음식 추천 의도는 DB 추천 서비스로 분기하고, 일반 문의만 Gemini 프롬프트를 사용합니다. |
+| 일반 챗봇 답변 | 챗봇 일반 문의 | 서비스 안내형 자연어 답변 | 음식 추천 의도는 DB 추천 서비스로 분기하고, 일반 문의만 Claude 프롬프트를 사용합니다. |
 
 ### 0.4 가장 중요한 운영 원칙
 
 | 원칙 | 코드 기준 | 이유 |
 |---|---|---|
-| DB에 없는 가게/메뉴는 추천하지 않음 | `RestaurantCandidateQueryService`, `GeminiRestaurantRecommendationClient.toValidatedGeminiItem` | 추천 결과를 바로 장소 후보로 추가할 수 있어야 하므로 실제 `storeId/menuId`가 필요합니다. |
+| DB에 없는 가게/메뉴는 추천하지 않음 | `RestaurantCandidateQueryService`, `RestaurantRecommendationService.toValidatedClaudeItem` | 추천 결과를 바로 장소 후보로 추가할 수 있어야 하므로 실제 `storeId/menuId`가 필요합니다. |
 | CLOSED 가게와 ON_SALE 메뉴 없는 가게는 추천 제외 | `businessStatus != CLOSED`, `MenuStatus.ON_SALE` | 사용자가 선택 가능한 실제 후보만 노출합니다. |
 | 신고 자동 처리는 보수적으로 수행 | `ModerationPolicyService.canAutoHide`, `ModerationRuleValidationService.inspectForCategory` | `decision=AUTO_HIDE`가 필수이고, 서버 규칙 일치 또는 AI 고확신 기준 중 하나를 만족해야 합니다. `REVIEW_REQUIRED`는 서버가 자동 숨김으로 올리지 않습니다. |
 | 관련 항목 함께 블라인드는 신고 대상 자동 처리 뒤에만 수행 | `ReportRelatedActionService`, `ReportRelatedActionItem` | 채팅/댓글의 같은 작성자 관련 위반 항목만 추가 숨김하고, 매너온도와 알림은 신고 대상 1건 기준으로만 처리합니다. |
-| AI 실패와 quota 초과는 자동 처리하지 않음 | `GeminiAiClient`, `AiProviderQuotaExceededException`, `AiModerationAnalysis.failed` | Gemini 429 또는 분석 실패는 `AI_FAILED`로 남기고 신고를 `PENDING` 상태로 유지해 관리자가 직접 처리할 수 있게 합니다. |
+| AI 실패와 quota 초과는 자동 처리하지 않음 | `ClaudeAiClient`, `AiProviderQuotaExceededException`, `AiModerationAnalysis.failed` | Claude 429 또는 분석 실패는 `AI_FAILED`로 남기고 신고를 `PENDING` 상태로 유지해 관리자가 직접 처리할 수 있게 합니다. |
 | 복구 가능한 처리 이력을 남김 | `ReportProcessHistory`, `TrustPenaltyHistory` | 관리자 취소/복구 시 콘텐츠 상태와 매너온도를 되돌리기 위해 처리 전 값을 저장합니다. |
 | 시연 데이터는 운영에서 꺼야 함 | `dev.dummy-data.enabled=true` + `app.demo-mode=true` | 대량 더미 계정/신고/리뷰가 운영 데이터와 섞이는 것을 막습니다. |
 
@@ -118,7 +118,7 @@
 | 일반 사용자 | 위치 기반 매칭, 채팅, 약속, 리뷰, 신고 | 회원가입 → 위치 저장 → 매칭 대기/신청 → 채팅방 → 약속 폼 → 리뷰/신고 | `matching/**`, `chat/**`, `ownerpage/store/service/ReviewService.java`, `report/service/ReportService.java` |
 | 점주 | 가게/메뉴/예약/리뷰 관리 | 점주 가입 → 관리자 승인 → 가게 등록 → 예약 처리 → 리뷰 답글/신고 | `member/signup/owner/**`, `ownerpage/store/**` |
 | 관리자 | 회원/점주/신고/AI 처리 관리 | 점주 승인 → 신고 처리 → 복구 → 대시보드 확인 | `admin/member/**`, `admin/report/**`, `admin/dashboard/**` |
-| AI 기능 | 신고 분류, 식당 추천 설명 생성 | 신고 접수 후 AI 분석, 식당 후보 DB 조회 후 Gemini 설명 | `ai/moderation/**`, `ai/recommendation/**` |
+| AI 기능 | 신고 분류, 식당 추천 설명 생성 | 신고 접수 후 AI 분석, 식당 후보 DB 조회 후 Claude 설명 | `ai/moderation/**`, `ai/recommendation/**` |
 | 지도/위치 | 주변 대기자/가게 표시 | 위치 저장 후 반경 필터 조회 | `MemberLocation`, `MatchingWaitingService`, `StoreRepository.findNearbyStores` |
 | 채팅/약속/리뷰 | 매칭 이후 만남 흐름 | 채팅방 생성 → 폼 생성/투표 → 예약 생성 → 채팅방 종료 → 리뷰 가능 | `ChatRoomCreateService`, `ChatFormService`, `ChatReviewService` |
 
@@ -407,19 +407,19 @@
 ## 5. AI 식당 추천 기준
 
 ### 5.1 기능 목적
-DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설명 생성에만 사용합니다.
+DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Claude는 설명 생성에만 사용합니다.
 
 ### 5.2 사용자 흐름
 개인은 챗봇에서 오늘의 음식 추천을 요청하고, 채팅방에서는 약속 장소 화면에서 AI 식당 추천을 요청합니다.
 
 ### 5.3 서버 처리 흐름
-`RestaurantRecommendationService`가 위치를 결정하고 후보를 조회합니다. 후보 점수 계산 후 Gemini에 후보 ID만 전달합니다. Gemini 결과는 storeId/menuId가 후보에 존재할 때만 사용됩니다.
+`RestaurantRecommendationService`가 위치를 결정하고 후보를 조회합니다. 후보 점수 계산 후 Claude에 후보 ID만 전달합니다. Claude 결과는 storeId/menuId가 후보에 존재할 때만 사용됩니다.
 
 ### 5.4 주요 클래스
 - `ai/recommendation/service/RestaurantRecommendationService.java`
 - `ai/recommendation/service/RestaurantCandidateQueryService.java`
 - `ai/recommendation/service/RestaurantScoringService.java`
-- `ai/recommendation/service/GeminiRestaurantRecommendationClient.java`
+- `ai/recommendation/service/ClaudeRestaurantRecommendationClient.java`
 - `ai/recommendation/controller/RestaurantRecommendationController.java`
 - `ai/recommendation/controller/ChatRoomRestaurantRecommendationController.java`
 
@@ -439,10 +439,10 @@ DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설�
 | CLOSED 제외 | `businessStatus == CLOSED` | 후보 제외 | `RestaurantCandidateQueryService.findCandidates` |
 | ON_SALE 메뉴 없음 | 판매 중 메뉴 0개 | 후보 제외 | `findCandidates` |
 | ACTIVE 리뷰 | `ReviewStatus.ACTIVE` | 평균/리뷰 수 반영 | `findByStore_StoreIdInAndStatusOrderByCreatedAtDesc` |
-| Gemini store 검증 | `recommendedStoreId`가 후보 map에 없음 | 폐기 | `toValidatedGeminiItem` |
-| Gemini menu 검증 | `recommendedMenuId`가 후보 메뉴에 없음 | 폐기 | `toValidatedGeminiItem` |
-| Gemini 실패 | API key 없음, HTTP/파싱 실패, 검증 결과 없음 | `DB_FALLBACK` | `GeminiRestaurantRecommendationClient.recommend`, `recommendInternal` |
-| 가격/평점/거리/리뷰 수 | 서버 DTO는 후보 DB 값 사용 | Gemini 생성값 미사용 | `toItem`, Gemini prompt policy |
+| Claude store 검증 | `recommendedStoreId`가 후보 map에 없음 | 폐기 | `toValidatedClaudeItem` |
+| Claude menu 검증 | `recommendedMenuId`가 후보 메뉴에 없음 | 폐기 | `toValidatedClaudeItem` |
+| Claude 실패 | API key 없음, HTTP/파싱 실패, 검증 결과 없음 | `DB_FALLBACK` | `ClaudeRestaurantRecommendationClient.recommend`, `recommendInternal` |
+| 가격/평점/거리/리뷰 수 | 서버 DTO는 후보 DB 값 사용 | Claude 생성값 미사용 | `toItem`, Claude prompt policy |
 
 ### 5.6 DB 점수 계산 기준
 
@@ -460,7 +460,7 @@ DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설�
 | 추천 메뉴 | 후보 메뉴에 속하고 카테고리 키워드 일치 `6`, 아니면 `3` | `recommendedMenuScore` |
 
 ### 5.7 예외/실패 처리
-후보가 없으면 `source=DB_FALLBACK`, `fallbackReason=NO_CANDIDATES`, 추천 목록 빈 배열을 반환합니다. Gemini 실패 시 DB 점수 기반 추천 문구로 응답합니다.
+후보가 없으면 `source=DB_FALLBACK`, `fallbackReason=NO_CANDIDATES`, 추천 목록 빈 배열을 반환합니다. Claude 실패 시 DB 점수 기반 추천 문구로 응답합니다.
 
 ### 5.8 화면에서 확인하는 방법
 채팅방 약속 장소 화면의 `AI 식당 추천` 버튼 또는 챗봇의 음식 추천 질문으로 확인합니다.
@@ -471,12 +471,12 @@ DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설�
 
 ### 5.10 주의사항
 - `RestaurantRecommendationContext`에는 `MAP/CHAT_PLACE/CHATBOT`이 있지만, 챗봇 추천 요청은 문자열 `"PERSONAL_RECOMMENDATION"`을 context로 넣습니다. 현재 서비스 로직은 context enum 변환을 하지 않아 동작에는 영향이 없습니다.
-- Gemini 추천 모델 기본값은 `gemini-3.5-flash`로 설정되어 있습니다. 실제 모델 사용 가능 여부는 배포 환경에서 확인해야 합니다.
+- Claude 추천 모델 기본값은 `claude-sonnet-5`로 설정되어 있습니다. 실제 모델 사용 가능 여부는 배포 환경에서 확인해야 합니다.
 
 ## 6. 챗봇 기능 기준
 
 ### 6.1 기능 목적
-일반 문의는 Gemini 기반 고객지원 답변으로 처리하고, 음식 추천 의도는 DB 기반 개인 추천으로 분리합니다.
+일반 문의는 Claude 기반 고객지원 답변으로 처리하고, 음식 추천 의도는 DB 기반 개인 추천으로 분리합니다.
 
 ### 6.2 사용자 흐름
 사용자가 챗봇에 질문을 입력합니다. 메시지가 음식/맛집/메뉴/식당/밥/점심/저녁과 추천 의도를 포함하면 개인 추천이 실행됩니다.
@@ -499,13 +499,13 @@ DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설�
 | 카테고리 없음 | 메시지 카테고리 없음 | 프로필 선호 음식 사용 | `extractRequestedCategory` |
 | 위치 없음 | `LOCATION_NOT_FOUND` | 위치 필요 안내 문구 반환 | `recommendForChatbot` |
 | 후보 없음 | 추천 목록 없음 | 주변 추천 가능 가게 부족 안내 | `recommendForChatbot` |
-| 일반 질문 | 추천 의도 아님 | Gemini 고객지원 프롬프트 호출 | `ChatbotService.getAiResponse` |
+| 일반 질문 | 추천 의도 아님 | Claude 고객지원 프롬프트 호출 | `ChatbotService.getAiResponse` |
 
 ### 6.6 상태값 변화
 챗봇 자체는 상태값을 변경하지 않습니다. 음식 추천은 조회성 동작입니다.
 
 ### 6.7 예외/실패 처리
-추천 관련 `CustomException`은 사용자 안내 문구로 변환됩니다. 일반 Gemini 질문 실패 시 `" 다시 한번 물어봐주세요."`를 반환합니다.
+추천 관련 `CustomException`은 사용자 안내 문구로 변환됩니다. 일반 Claude 질문 실패 시 `" 다시 한번 물어봐주세요."`를 반환합니다.
 
 ### 6.8 화면에서 확인하는 방법
 챗봇 입력창에서 `오늘의 음식 추천해줘`, `오늘 뭐 먹지`, `근처 맛집 추천`을 입력합니다.
@@ -514,8 +514,8 @@ DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설�
 `user1`로 로그인 후 위치가 저장된 상태에서 확인합니다.
 
 ### 6.10 주의사항
-- 일반 질문 Gemini 호출은 `RestTemplate`을 직접 사용합니다.
-- 식당 추천은 Gemini가 직접 가게를 만들지 않고 `RestaurantRecommendationService`의 DB 후보만 사용합니다.
+- 일반 질문 Claude 호출은 Anthropic Java SDK(`AnthropicClient`)를 직접 사용합니다.
+- 식당 추천은 Claude가 직접 가게를 만들지 않고 `RestaurantRecommendationService`의 DB 후보만 사용합니다.
 
 ## 7. 가게/메뉴/예약/리뷰 흐름
 
@@ -657,14 +657,14 @@ DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설�
 신고 접수 → context snapshot 저장 → 커밋 이후 비동기 AI 분석 → 자동 처리 또는 관리자 검토 → 관리자/신고자/작성자 알림 발송.
 
 ### 9.3 서버 처리 흐름
-`ReportService`가 `Report`를 저장한 뒤 `ReportContextSnapshotService.createSnapshot`으로 신고 대상과 제한된 주변 문맥을 저장합니다. `ReportCreatedModerationListener`가 커밋 이후 `AiModerationService.analyzeReport`를 호출합니다. `AiClient`는 `ai.provider` 설정에 따라 `mock` 또는 `gemini` 구현이 사용됩니다.
+`ReportService`가 `Report`를 저장한 뒤 `ReportContextSnapshotService.createSnapshot`으로 신고 대상과 제한된 주변 문맥을 저장합니다. `ReportCreatedModerationListener`가 커밋 이후 `AiModerationService.analyzeReport`를 호출합니다. `AiClient`는 `ai.provider` 설정에 따라 `mock` 또는 `claude` 구현이 사용됩니다.
 
 자동 처리는 두 경로가 있습니다. 첫째, 서버 규칙이 직접 맞으면 `SERVER_RULE_MATCHED` 근거로 처리합니다. 둘째, 서버 규칙 직접 일치는 아니어도 AI 결과가 더 높은 고확신 기준을 충족하면 `AI_HIGH_CONFIDENCE` 근거로 처리할 수 있습니다. 반대로 `exclusionMatched=true`이거나 AI가 `REVIEW_REQUIRED`를 반환한 경우에는 서버가 자동 숨김으로 승격하지 않습니다.
 
 ### 9.4 주요 클래스
 - `ai/client/MockAiClient.java`
-- `ai/client/GeminiAiClient.java`
-- `ai/client/GeminiClientConfiguration.java`
+- `ai/client/ClaudeAiClient.java`
+- `ai/client/ClaudeClientConfiguration.java`
 - `ai/moderation/service/AiModerationService.java`
 - `ai/moderation/service/ModerationPolicyService.java`
 - `ai/moderation/service/ModerationRuleValidationService.java`
@@ -678,8 +678,8 @@ DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설�
 | 판단 항목 | 기준 | 결과 | 코드 위치 |
 |---|---|---|---|
 | provider 선택 | `ai.provider=mock` 또는 미설정 | `MockAiClient` 사용 | `@ConditionalOnProperty` |
-| provider 선택 | `ai.provider=gemini` | `GeminiAiClient`/`RestClient` 사용 | `GeminiClientConfiguration` |
-| 공식 provider | `mock`, `gemini` | OpenAI/GPT provider 없음 | `application.properties`, `GeminiClientConfiguration` |
+| provider 선택 | `ai.provider=claude` | `ClaudeAiClient`/Anthropic Java SDK 사용 | `ClaudeClientConfiguration` |
+| 공식 provider | `mock`, `claude` | OpenAI/GPT/Gemini provider 없음 | `application.properties`, `ClaudeClientConfiguration` |
 | AI 분석 대상 | `POST/COMMENT/CHAT_MESSAGE/REVIEW` 텍스트 | title/content/message/review content 추출 | `ModerationTargetContentService` |
 | 사진-only | 첨부 있음 + 실질 텍스트 없음 | `REVIEW_REQUIRED`, `IMAGE-NOT-ANALYZED` | `requiresImageReview`, `imageReviewResult` |
 | 스팸 자동 후보 | URL + 상업 문구 + 고위험 문구 또는 상업 단서 3개 이상 | `SPAM_AD/AUTO_HIDE` 후보 | `ModerationRuleValidationService.inspect`, `MockAiClient` |
@@ -703,8 +703,8 @@ DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설�
 | 관련 채팅 메시지 숨김 | `CHAT_MESSAGE` + `SPAM_AD/FLOODING/ABUSE/SEXUAL_HARASSMENT/PERSONAL_INFO` 자동 처리 후, snapshot 안 같은 채팅방/작성자/비삭제/신고자 제외/개별 후보 통과 | 관련 메시지 숨김 + `ReportRelatedActionItem` 저장 | `ReportRelatedActionService` |
 | 관련 댓글 숨김 | `COMMENT` + `ABUSE/SEXUAL_HARASSMENT/SPAM_AD/FLOODING/PERSONAL_INFO` 자동 처리 후, snapshot 안 같은 게시글/작성자/ACTIVE/신고자 제외/개별 후보 통과 | 관련 댓글 숨김 + `ReportRelatedActionItem` 저장 | `ReportRelatedActionService` |
 | 관련 항목 중복 방지 | 동일 `reportId + targetType + targetId + actionType` | 중복 저장 차단 | `UK_REPORT_RELATED_ACTION_ITEM`, `existsBy...` |
-| Gemini 429 quota | HTTP 429/`RESOURCE_EXHAUSTED` | `AI_FAILED`, 신고 `PENDING` 유지, 자동 숨김 없음 | `AiProviderQuotaExceededException`, `markFailedAndNotify` |
-| 일반 AI 실패 | timeout/HTTP/JSON/검증 실패 | 관리자 검토용 실패 이력 저장 또는 fallback | `GeminiAiClient.fallback`, `markFailedAndNotify` |
+| Claude 429 quota | HTTP 429/`rate_limit_error` | `AI_FAILED`, 신고 `PENDING` 유지, 자동 숨김 없음 | `AiProviderQuotaExceededException`, `markFailedAndNotify` |
+| 일반 AI 실패 | timeout/HTTP/JSON/검증 실패 | 관리자 검토용 실패 이력 저장 또는 fallback | `ClaudeAiClient.fallback`, `markFailedAndNotify` |
 
 ### 9.5.1 autoHideBasis 의미
 
@@ -742,7 +742,7 @@ DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설�
 | `친구가 나한테 병신이라고 했어요` | 피해 신고/인용 가능성으로 관리자 검토 |
 | `성희롱 예시로 몸 보여줘 같은 말이 있습니다` | 예시/교육 문맥으로 관리자 검토 |
 | `가게 전화번호는 02-123-4567입니다` | 공개 연락처 가능성으로 related hide 제외 또는 관리자 검토 |
-| Gemini 무료 API 429 | `AI_FAILED`, 신고 `PENDING`, 관리자 수동 처리 |
+| Claude API 429 | `AI_FAILED`, 신고 `PENDING`, 관리자 수동 처리 |
 
 ### 9.6 상태값 변화
 - 분석 저장: `AiProcessingStatus.SUCCEEDED/REVIEW_REQUIRED/NO_ACTION/FAILED`
@@ -753,7 +753,7 @@ DB에 존재하는 가게/판매 중 메뉴만 후보로 삼고, Gemini는 설�
 - 관련 항목 숨김: `ReportRelatedActionItem.restored=false`
 
 ### 9.7 예외/실패 처리
-Gemini API key 없음, 일반 HTTP 실패, JSON 파싱 실패, safety block 등은 자동 숨김으로 올리지 않습니다. Gemini HTTP 429 또는 `RESOURCE_EXHAUSTED`는 `AiProviderQuotaExceededException`으로 구분하고, `AiModerationAnalysis.processingStatus=FAILED`, `autoHideBasis=AI_FAILED`로 저장합니다. 이때 `Report`는 `PENDING`으로 유지되고 자동 블라인드, 관련 항목 숨김, 매너온도 차감은 실행하지 않습니다. 관리자에게는 검토 필요 알림을 만들고, 화면에는 “AI 사용량 한도 초과로 관리자 검토가 필요합니다.”처럼 사용자 친화적인 문구만 보여줍니다. API key, 실제 모델명, Gemini 원본 오류 메시지는 화면에 노출하지 않습니다.
+Claude API key 없음, 일반 HTTP 실패, JSON 파싱 실패, refusal(안전 차단) 등은 자동 숨김으로 올리지 않습니다. Claude HTTP 429 또는 `rate_limit_error`는 `AiProviderQuotaExceededException`으로 구분하고, `AiModerationAnalysis.processingStatus=FAILED`, `autoHideBasis=AI_FAILED`로 저장합니다. 이때 `Report`는 `PENDING`으로 유지되고 자동 블라인드, 관련 항목 숨김, 매너온도 차감은 실행하지 않습니다. 관리자에게는 검토 필요 알림을 만들고, 화면에는 “AI 사용량 한도 초과로 관리자 검토가 필요합니다.”처럼 사용자 친화적인 문구만 보여줍니다. API key, 실제 모델명, Claude 원본 오류 메시지는 화면에 노출하지 않습니다.
 
 관련 항목 숨김은 신고 대상 자동 처리 이후 별도 트랜잭션으로 시도합니다. 관련 항목 처리에 실패해도 신고 대상 자동 처리 자체는 유지되며 로그가 남습니다. 반대로 실제 대상 숨김 전에 관련 이력을 먼저 저장하지 않습니다.
 
@@ -767,7 +767,7 @@ Gemini API key 없음, 일반 HTTP 실패, JSON 파싱 실패, safety block 등�
 - AI 자동 처리도 `TrustService.applyAiReportPenalty`로 5.0점을 차감하지만, `lockAccountWhenZero=false`라 단일 AI 처리로 즉시 계정 잠금하지 않습니다.
 - 관련 메시지/댓글을 여러 건 함께 숨겨도 매너온도는 신고 대상 1건 기준으로만 차감합니다.
 - 관련 항목 추가 알림은 별도로 보내지 않고 기존 신고 대상 1건 기준 알림만 사용합니다.
-- `AiGeminiProperties` record 내부 fallback은 `timeoutSeconds <= 0`일 때 10초지만, `application.properties` 기본값은 30초입니다.
+- `AiClaudeProperties` record 내부 fallback은 `timeoutSeconds <= 0`일 때 10초지만, `application.properties` 기본값은 30초입니다.
 
 ## 10. 신고 처리 복구 기준
 
@@ -1017,24 +1017,24 @@ AI, 지도, demo mode, secret 설정을 운영 환경에 맞게 분리합니다.
 배포 전 환경변수와 외부 콘솔 설정을 완료한 뒤 운영 profile로 실행합니다.
 
 ### 14.3 서버 처리 흐름
-`application.properties`와 `AiGeminiProperties`가 환경변수 기반 값을 읽습니다.
+`application.properties`와 `AiClaudeProperties`가 환경변수 기반 값을 읽습니다.
 
 ### 14.4 주요 파일
 - `src/main/resources/application.properties`
 - `build.gradle`
 - `.gitignore`
-- `ai/client/AiGeminiProperties.java`
+- `ai/client/AiClaudeProperties.java`
 
 ### 14.5 판단 기준
 
 | 판단 항목 | 기준 | 결과 | 코드 위치 |
 |---|---|---|---|
-| AI provider | `AI_PROVIDER=gemini` | Gemini moderation client 사용 | `GeminiClientConfiguration` |
+| AI provider | `AI_PROVIDER=claude` | Claude moderation client 사용 | `ClaudeClientConfiguration` |
 | 기본 provider | 미설정 또는 `mock` | Mock client 사용 | `MockAiClient` |
-| Gemini API key | `GEMINI_API_KEY` | Gemini 호출 가능 | `application.properties` |
-| Gemini 모델 | `GEMINI_MODEL` | 신고 분석 모델 | `AiGeminiProperties` |
-| 추천 모델 | `GEMINI_RECOMMENDATION_MODEL` | 식당 추천 설명 모델 | `GeminiRestaurantRecommendationClient` |
-| timeout 권장 | `GEMINI_TIMEOUT_SECONDS=30` | 연결/읽기 timeout | `application.properties` |
+| Claude API key | `CLAUDE_API_KEY`(또는 `ANTHROPIC_API_KEY`) | Claude 호출 가능 | `application.properties` |
+| Claude 모델 | `CLAUDE_MODEL` | 신고 분석 모델 | `AiClaudeProperties` |
+| 추천 모델 | `CLAUDE_RECOMMENDATION_MODEL` | 식당 추천 설명 모델 | `ClaudeRestaurantRecommendationClient` |
+| timeout 권장 | `CLAUDE_TIMEOUT_SECONDS=30` | 연결/읽기 timeout | `application.properties` |
 | Naver Map | `NAVER_MAP_CLIENT_ID` | 지도 JS client id | `application.properties`, templates |
 | secret 제외 | 현재 `build.gradle.processResources`에 제외 규칙 없음 | 로컬/비밀 설정이 산출물에 섞이지 않도록 배포 전 별도 점검 필요 | `build.gradle.processResources` |
 | demo mode | `app.demo-mode=false` | DataLoader 실행 방지 | `DataLoader` |
@@ -1043,7 +1043,7 @@ AI, 지도, demo mode, secret 설정을 운영 환경에 맞게 분리합니다.
 배포 설정은 상태값을 바꾸지 않지만, AI provider와 DataLoader 실행 여부를 결정합니다.
 
 ### 14.7 예외/실패 처리
-Gemini API key가 없으면 추천은 DB fallback, 신고 분석은 provider 설정에 따라 mock 또는 Gemini fallback을 사용합니다. Gemini 신고 분석에서 429 quota 초과가 발생하면 `AI_FAILED`로 저장하고 신고는 `PENDING`으로 유지합니다.
+Claude API key가 없으면 추천은 DB fallback, 신고 분석은 provider 설정에 따라 mock 또는 Claude fallback을 사용합니다. Claude 신고 분석에서 429 quota 초과가 발생하면 `AI_FAILED`로 저장하고 신고는 `PENDING`으로 유지합니다.
 
 ### 14.8 화면에서 확인하는 방법
 지도 화면에서 Naver Map 로딩, AI 추천/신고에서 fallback 여부, 관리자 대시보드를 확인합니다.
@@ -1054,7 +1054,7 @@ Gemini API key가 없으면 추천은 DB fallback, 신고 분석은 provider 설
 ### 14.10 주의사항
 - `application.properties`가 `spring.profiles.active=local`, `spring.profiles.include=local`을 포함합니다. 운영 배포 전 profile 설정을 반드시 분리해야 합니다.
 - 현재 `build.gradle`의 `processResources` 블록은 비어 있어 `application-local.properties` 또는 비밀 설정 파일 제외를 보장하지 않습니다. 실제 비밀값은 환경변수나 배포 시스템 secret으로 옮기고 산출물 포함 여부를 확인해야 합니다.
-- Gemini 모델 기본값은 코드 설정상 `gemini-3.5-flash`입니다. 이 이름이 실제 운영 계정에서 사용 가능한지는 배포 환경에서 별도 확인해야 합니다.
+- Claude 모델 기본값은 코드 설정상 `claude-sonnet-5`입니다. 이 이름이 실제 운영 계정에서 사용 가능한지는 배포 환경에서 별도 확인해야 합니다.
 - Naver Cloud Console에 배포 도메인을 등록해야 지도 인증 오류가 나지 않습니다.
 - HTTPS 환경에서 위치 권한이 정상 동작합니다. localhost 예외를 제외하면 브라우저 위치 API는 보안 컨텍스트가 필요합니다.
 
@@ -1063,8 +1063,8 @@ Gemini API key가 없으면 추천은 DB fallback, 신고 분석은 provider 설
 ### Q. 챗봇 추천과 채팅방 추천은 뭐가 다른가?
 챗봇 추천은 로그인 사용자 1명의 `preferredFoodCategory`와 위치 기준입니다. 채팅방 추천은 채팅방 참여자 전체의 `preferredFoodCategory`를 집계하고 다수결/참여자 선호 점수를 추가 반영합니다.
 
-### Q. Gemini가 직접 가게를 고르는가?
-아닙니다. 서버가 DB 후보를 먼저 만들고 Gemini에는 후보 `storeId/menuId`만 전달합니다. Gemini가 후보에 없는 ID를 반환하면 폐기됩니다.
+### Q. Claude가 직접 가게를 고르는가?
+아닙니다. 서버가 DB 후보를 먼저 만들고 Claude에는 후보 `storeId/menuId`만 전달합니다. Claude가 후보에 없는 ID를 반환하면 폐기됩니다.
 
 ### Q. 왜 DB 후보 기반으로 추천하는가?
 가격, 평점, 거리, 리뷰 수, 메뉴 판매 상태는 DB 값이 기준입니다. 없는 가게/메뉴를 생성하지 않기 위해 후보 검증을 서버에서 수행합니다.
@@ -1084,8 +1084,8 @@ Gemini API key가 없으면 추천은 DB fallback, 신고 분석은 provider 설
 ### Q. 관련 메시지/댓글이 여러 건 숨겨지면 매너온도도 여러 번 차감되는가?
 아닙니다. 관련 항목은 노출 정리를 위한 추가 블라인드일 뿐 추가 제재가 아닙니다. 매너온도 차감과 작성자 알림은 신고 대상 1건 기준으로만 처리합니다.
 
-### Q. Gemini 무료 한도를 넘으면 사용자는 어떤 상태를 보게 되는가?
-Gemini 429 quota 초과는 코드 오류와 구분해 `AI_FAILED`로 저장합니다. 신고는 `PENDING`으로 남아 관리자가 수동 처리할 수 있고, 자동 블라인드/관련 항목 숨김/매너온도 차감은 실행하지 않습니다. 화면에는 내부 API key, 모델명, 원본 오류 대신 관리자 검토가 필요하다는 안내만 표시합니다.
+### Q. Claude API 사용량 한도를 넘으면 사용자는 어떤 상태를 보게 되는가?
+Claude 429 quota 초과는 코드 오류와 구분해 `AI_FAILED`로 저장합니다. 신고는 `PENDING`으로 남아 관리자가 수동 처리할 수 있고, 자동 블라인드/관련 항목 숨김/매너온도 차감은 실행하지 않습니다. 화면에는 내부 API key, 모델명, 원본 오류 대신 관리자 검토가 필요하다는 안내만 표시합니다.
 
 ### Q. DataLoader는 운영에서도 켜도 되는가?
 아니요. `dev.dummy-data.enabled=true`와 `app.demo-mode=true`가 모두 필요하지만, 운영에서는 둘 다 꺼야 합니다.

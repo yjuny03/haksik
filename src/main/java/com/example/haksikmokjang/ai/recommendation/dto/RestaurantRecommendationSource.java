@@ -1,6 +1,6 @@
 package com.example.haksikmokjang.ai.recommendation.dto;
 
 public enum RestaurantRecommendationSource {
-    GEMINI,
+    CLAUDE,
     DB_FALLBACK
 }
