@@ -21,6 +21,7 @@ import com.example.haksikmokjang.member.signup.user.repository.UserProfileReposi
 import com.example.haksikmokjang.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -39,7 +40,12 @@ public class MatchingRequestService {
     private final ChatRoomCreateService chatRoomCreateService;
 
     // 매칭 요청 생성
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void requestMatching(Long memberId, MatchingRequestCreateRequest request) {
+
+        // 같은 모집방에 대한 요청을 한 번에 하나씩 처리하도록 모집방부터 잠근다.
+        // (잠금 이후 조회는 앞선 트랜잭션이 커밋한 신청까지 보이므로 중복 신청 확인이 정확해진다)
+        MatchingWaiting targetWaiting = lockWaiting(request.getTargetWaitingId());
 
         // 신청자 프로필 조회
         UserProfile requester = userProfileRepository.findByMember_MemberId(memberId)
@@ -57,18 +63,15 @@ public class MatchingRequestService {
             throw new CustomException(ErrorCode.MATCHING_ACCEPTED_ALREADY_EXISTS);
         }
 
-        // 신청 대상 대기 정보 조회
-        MatchingWaiting targetWaiting = matchingWaitingRepository.findById(request.getTargetWaitingId())
-                .orElseThrow(() -> new CustomException(ErrorCode.MATCHING_TARGET_NOT_FOUND));
+        // 단체 학식 모집 정원 확인
+        // 정원이 차면 모집방 상태가 MATCHED로 바뀌므로, 상태 확인보다 먼저 봐야 "정원 마감"으로 안내된다.
+        if (targetWaiting.isGroupMeal() && targetWaiting.isFull()) {
+            throw new CustomException(ErrorCode.MATCHING_PARTICIPANTS_FULL);
+        }
 
         // 신청 대상 대기 상태 확인
         if (targetWaiting.getStatus() != MatchingWaitingStatus.WAITING) {
             throw new CustomException(ErrorCode.MATCHING_TARGET_NOT_WAITING);
-        }
-
-        // 단체 학식 모집 정원 확인
-        if (targetWaiting.isGroupMeal() && targetWaiting.isFull()) {
-            throw new CustomException(ErrorCode.MATCHING_PARTICIPANTS_FULL);
         }
 
         // 신청 대상 프로필 조회
@@ -134,8 +137,11 @@ public class MatchingRequestService {
     }
 
     // 확정된 매칭 취소
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void cancelAcceptedMatching(Long memberId, Long matchingId) {
+
+        // 같은 모집방의 수락·취소와 겹치지 않도록 모집방부터 잠근다.
+        lockWaitingOf(matchingId);
 
         // 내 프로필 조회
         UserProfile userProfile = userProfileRepository.findByMember_MemberId(memberId)
@@ -340,7 +346,12 @@ public class MatchingRequestService {
     }
 
     // 매칭 요청 수락
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Long acceptMatching(Long memberId, Long matchingId) {
+
+        // 같은 모집방의 수락을 한 번에 하나씩 처리하도록 모집방부터 잠근다.
+        // 잠금을 얻은 뒤 매칭·참여 인원·기존 채팅방을 읽어야 앞선 수락 결과가 반영된다.
+        lockWaitingOf(matchingId);
 
         // 내 프로필 조회
         UserProfile target = userProfileRepository.findByMember_MemberId(memberId)
@@ -402,7 +413,11 @@ public class MatchingRequestService {
     }
 
     // 매칭 요청 거절
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void rejectMatching(Long memberId, Long matchingId) {
+
+        // 같은 요청을 동시에 수락·거절하지 않도록 모집방부터 잠근다.
+        lockWaitingOf(matchingId);
 
         // 내 프로필 조회
         UserProfile target = userProfileRepository.findByMember_MemberId(memberId)
@@ -435,7 +450,11 @@ public class MatchingRequestService {
     }
 
     // 내가 보낸 매칭 요청 취소
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void cancelSentMatching(Long memberId, Long matchingId) {
+
+        // 신청 취소와 수락이 동시에 처리되지 않도록 모집방부터 잠근다.
+        lockWaitingOf(matchingId);
 
         // 내 프로필 조회
         UserProfile requester = userProfileRepository.findByMember_MemberId(memberId)
@@ -481,6 +500,19 @@ public class MatchingRequestService {
         ).ifPresent(MatchingWaiting::matched);
     }
 
+    // 모집방 행 잠금 (SELECT ... FOR UPDATE). 같은 모집방에 대한 요청은 여기서 줄을 선다.
+    private MatchingWaiting lockWaiting(Long waitingId) {
+        return matchingWaitingRepository.findByIdForUpdate(waitingId)
+                .orElseThrow(() -> new CustomException(ErrorCode.MATCHING_TARGET_NOT_FOUND));
+    }
+
+    // 매칭이 속한 모집방을 잠근다. 매칭 엔티티를 미리 읽어 두면 잠금 전 상태가 남으므로 ID만 먼저 조회한다.
+    private void lockWaitingOf(Long matchingId) {
+        Long waitingId = matchingRepository.findTargetWaitingIdByMatchingId(matchingId)
+                .orElseThrow(() -> new CustomException(ErrorCode.MATCHING_NOT_FOUND));
+        lockWaiting(waitingId);
+    }
+
     // 단체 학식 수락 후 신청자 종료 및 모집 인원 증가
     private void acceptGroupMealMatching(Matching matching) {
 
@@ -493,12 +525,13 @@ public class MatchingRequestService {
         // 신청 대상 모집방 조회
         MatchingWaiting targetWaiting = matching.getTargetWaiting();
 
-        if (targetWaiting.getStatus() != MatchingWaitingStatus.WAITING) {
-            throw new CustomException(ErrorCode.MATCHING_TARGET_NOT_WAITING);
-        }
-
+        // 정원이 차면 상태가 MATCHED로 바뀌므로, 정원부터 확인해야 "정원 마감"으로 안내된다.
         if (targetWaiting.isFull()) {
             throw new CustomException(ErrorCode.MATCHING_PARTICIPANTS_FULL);
+        }
+
+        if (targetWaiting.getStatus() != MatchingWaitingStatus.WAITING) {
+            throw new CustomException(ErrorCode.MATCHING_TARGET_NOT_WAITING);
         }
 
         // 모집 인원 증가

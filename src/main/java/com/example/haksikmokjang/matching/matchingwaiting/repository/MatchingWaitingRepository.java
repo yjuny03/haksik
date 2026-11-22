@@ -5,7 +5,9 @@ import com.example.haksikmokjang.matching.matchingwaiting.domain.MatchingType;
 import com.example.haksikmokjang.matching.matchingwaiting.domain.MatchingWaiting;
 import com.example.haksikmokjang.matching.matchingwaiting.domain.MatchingWaitingStatus;
 import com.example.haksikmokjang.member.signup.user.domain.UserProfile;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -52,4 +54,10 @@ public interface MatchingWaitingRepository extends JpaRepository<MatchingWaiting
             @Param("now") LocalDateTime now,
             @Param("matchingType") MatchingType matchingType
     );
+
+    // 모집방 행을 SELECT ... FOR UPDATE로 잠가 조회한다.
+    // 같은 모집방에 대한 신청·수락·거절·취소를 한 번에 하나씩 처리하기 위한 잠금 단위.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select w from MatchingWaiting w where w.waitingId = :waitingId")
+    Optional<MatchingWaiting> findByIdForUpdate(@Param("waitingId") Long waitingId);
 }
