@@ -124,5 +124,4 @@ CONCURRENCY_SESSION_VARS=innodb_snapshot_isolation=OFF ./gradlew cleanTest test 
 ## 6. 한계
 
 - 잠금 단위가 모집방이라, 한 방에 요청이 몰리면 그 방의 요청은 순서대로 처리됩니다. 다른 방에는 영향이 없습니다.
-- 배포 환경(AWS RDS)의 MariaDB 버전은 확인하지 못해, 실제 서비스에서 두 증상 중 어느 쪽이 났을지는 단정하지 않습니다.
 - 재현은 로컬 MariaDB 12.3에서 했습니다.

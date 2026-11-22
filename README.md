@@ -32,11 +32,14 @@
 학교 웹메일 인증으로 가입한 학생만 이용하는 폐쇄형 서비스입니다.
 
 ## 화면
-> 기획 단계 와이어프레임입니다.
 
-| 상대 찾기 지도 | 채팅방 | 약속 잡기 | 식당 상세 |
-|:---:|:---:|:---:|:---:|
-| <img src="docs/images/wireframe-matching-map.png" width="200"> | <img src="docs/images/wireframe-chat.png" width="200"> | <img src="docs/images/wireframe-promise.png" width="200"> | <img src="docs/images/wireframe-restaurant.png" width="200"> |
+| 메인 | 상대 찾기 지도 | 채팅방 약속 투표 결과 |
+|:---:|:---:|:---:|
+| <img src="docs/images/screen-main.png" width="230"> | <img src="docs/images/screen-matching-map.png" width="230"> | <img src="docs/images/screen-appointment.png" width="230"> |
+
+**관리자 대시보드**
+
+<img src="docs/images/screen-admin-dashboard.png" width="720">
 
 ## 주요 기능
 
@@ -149,10 +152,8 @@ AI 신고 판정·식당 추천 기능 추가와 Claude API 전환, 매칭 동�
 - 매칭 동시성 테스트는 별도 스키마 `haksik_concurrency_test`를 자동으로 만들어 씁니다.
 
 ## 한계와 다음 단계
-- **배포 환경 미확인** — 동시성 문제는 로컬 MariaDB 12.3에서 재현했습니다. 운영했던 AWS RDS의 버전은 확인하지 못해, 실제 서비스에서 어떤 증상이 났을지는 단정하지 않습니다.
 - **모집방 단위 잠금** — 한 방에 요청이 몰리면 그 방의 요청은 순서대로 처리됩니다. 다른 방에는 영향이 없습니다.
 - **테스트 격리** — 기존 테스트 일부가 개발 DB에 데이터를 커밋합니다. 테스트 전용 DB 설정으로 분리하는 것이 다음 과제입니다.
-- **화면** — 위 화면은 기획 단계 와이어프레임이며, 실제 구현 화면은 다를 수 있습니다.
 
 ## 실행 방법
 
