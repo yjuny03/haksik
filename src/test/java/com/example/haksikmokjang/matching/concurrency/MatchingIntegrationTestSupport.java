@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
 @SpringBootTest
 @ActiveProfiles("local")
 @TestPropertySource(properties = {
-        // CONCURRENCY_SESSION_VARS=innodb_snapshot_isolation=OFF 로 주면 MariaDB 11.8 이전·MySQL과 같은 동작(갱신 손실 허용)으로 확인할 수 있다.
+        // CONCURRENCY_SESSION_VARS=innodb_snapshot_isolation=OFF 로 주면 MariaDB 11.6.2 이전·MySQL과 같은 동작(갱신 손실 허용)으로 확인할 수 있다.
         "spring.datasource.url=jdbc:mariadb://localhost:3306/haksik_concurrency_test?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&sessionVariables=${CONCURRENCY_SESSION_VARS:wait_timeout=28800}",
         "spring.jpa.hibernate.ddl-auto=update",
         "spring.jpa.show-sql=false",

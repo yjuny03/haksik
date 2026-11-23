@@ -45,7 +45,7 @@ targetWaiting.increaseParticipant();     // ② 인원 증가
 Record has changed since last read in table 'matching_waiting'; try restarting transaction
 ```
 
-MariaDB 11.8부터 기본으로 켜진 `innodb_snapshot_isolation` 때문입니다. REPEATABLE READ에서 내가 읽은 뒤 다른 트랜잭션이 바꾼 행을 수정하려 하면, 덮어쓰지 않고 오류를 냅니다.
+MariaDB 11.6.2부터 기본으로 켜진 `innodb_snapshot_isolation` 때문입니다(LTS 기준으로는 11.8부터). REPEATABLE READ에서 내가 읽은 뒤 다른 트랜잭션이 바꾼 행을 수정하려 하면, 덮어쓰지 않고 오류를 냅니다.
 즉 DB가 갱신 손실을 대신 막아 준 것이고, 서버 코드는 여전히 동시 요청을 고려하지 않았습니다. 사용자는 "정원 마감" 대신 서버 오류를 봅니다.
 
 이 설정을 세션에서 끄고 다시 돌리자, MySQL이나 이전 MariaDB와 같은 동작이 되어 정원 초과와 채팅방 분리가 그대로 나타났습니다.
